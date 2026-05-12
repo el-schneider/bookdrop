@@ -20,21 +20,9 @@ FROM php:8.4-apache AS app
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
-        libcurl4-openssl-dev \
-        libonig-dev \
-        libsqlite3-dev \
-        libxml2-dev \
         libzip-dev \
         unzip \
-        zlib1g-dev \
-    && docker-php-ext-install \
-        curl \
-        dom \
-        mbstring \
-        pdo_sqlite \
-        sqlite3 \
-        xml \
-        zip \
+    && docker-php-ext-install zip \
     && a2enmod rewrite \
     && { \
         echo 'upload_max_filesize=128M'; \
