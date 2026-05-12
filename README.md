@@ -50,6 +50,7 @@ Required CapRover settings:
   - `BOOKDROP_BOOKS_PATH=books`
   - `SESSION_DRIVER=database`
   - `CACHE_STORE=database`
-  - `QUEUE_CONNECTION=database`
+  - `QUEUE_CONNECTION=sync`
+  - `SESSION_SECURE_COOKIE=true`
 
 On boot the container creates `/data/books` and `/data/database.sqlite`, runs migrations, caches config/routes/views, then starts Apache on port `80`.

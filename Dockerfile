@@ -7,7 +7,7 @@ RUN composer install --no-dev --no-interaction --prefer-dist --no-progress --no-
 COPY . .
 RUN composer dump-autoload --no-dev --no-interaction --optimize
 
-FROM node:25-alpine AS assets
+FROM node:22-alpine AS assets
 WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci --no-audit --no-fund
@@ -36,6 +36,11 @@ RUN apt-get update \
         xml \
         zip \
     && a2enmod rewrite \
+    && { \
+        echo 'upload_max_filesize=128M'; \
+        echo 'post_max_size=128M'; \
+        echo 'memory_limit=256M'; \
+    } > /usr/local/etc/php/conf.d/bookdrop.ini \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 

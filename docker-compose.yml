@@ -17,7 +17,7 @@ services:
       BOOKDROP_BOOKS_PATH: books
       SESSION_DRIVER: database
       CACHE_STORE: database
-      QUEUE_CONNECTION: database
+      QUEUE_CONNECTION: sync
     volumes:
       - bookdrop-data:/data
 
