@@ -47,6 +47,13 @@ return [
             'report' => false,
         ],
 
+        'bookdrop' => [
+            'driver' => 'local',
+            'root' => env('BOOKDROP_STORAGE_PATH', storage_path('app/private/bookdrop')),
+            'throw' => false,
+            'report' => false,
+        ],
+
         's3' => [
             'driver' => 's3',
             'key' => env('AWS_ACCESS_KEY_ID'),

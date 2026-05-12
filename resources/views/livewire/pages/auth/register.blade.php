@@ -20,6 +20,8 @@ new #[Layout('layouts.guest')] class extends Component
      */
     public function register(): void
     {
+        abort_if(User::query()->exists(), 404);
+
         $validated = $this->validate([
             'name' => ['required', 'string', 'max:255'],
             'email' => ['required', 'string', 'lowercase', 'email', 'max:255', 'unique:'.User::class],
