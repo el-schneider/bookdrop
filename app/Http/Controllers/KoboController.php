@@ -83,11 +83,11 @@ class KoboController extends Controller
     public function getState(string $token, string $bookId): JsonResponse
     {
         $this->ensureValidToken($token);
-        $book = $this->findBook($bookId);
+        $book = Book::query()->whereKey($bookId)->first();
 
         return response()->json([
             'ReadingState' => [
-                'EntitlementId' => $book->id,
+                'EntitlementId' => $book?->id ?? $bookId,
                 'StatusInfo' => [
                     'Status' => 'ReadyToRead',
                 ],
@@ -102,15 +102,23 @@ class KoboController extends Controller
     public function putState(string $token, string $bookId): JsonResponse
     {
         $this->ensureValidToken($token);
-        $this->findBook($bookId);
 
-        return response()->json(['Result' => 'Success']);
+        return response()->json([
+            'RequestResult' => 'Success',
+            'UpdateResults' => [[
+                'EntitlementId' => $bookId,
+                'CurrentBookmarkResult' => ['Result' => 'Success'],
+                'StatisticsResult' => ['Result' => 'Success'],
+                'StatusInfoResult' => ['Result' => 'Success'],
+                'LastModified' => now()->toIso8601String(),
+                'PriorityTimestamp' => now()->toIso8601String(),
+            ]],
+        ]);
     }
 
     public function deleteEntitlement(string $token, string $bookId): JsonResponse
     {
         $this->ensureValidToken($token);
-        $this->findBook($bookId);
 
         return response()->json(['Result' => 'Success']);
     }
@@ -199,32 +207,55 @@ class KoboController extends Controller
     private function bookMetadata(Book $book, Request $request, string $token): array
     {
         return [
-            'Categories' => [],
-            'Contributors' => $book->author ? [[
+            'Categories' => ['00000000-0000-0000-0000-000000000001'],
+            'ContributorRoles' => $book->author ? [[
                 'Name' => $book->author,
-                'Role' => 'Author',
             ]] : [],
+            'Contributors' => $book->author ? [$book->author] : [],
+            'CoverImageId' => $book->id,
+            'CrossRevisionId' => $book->id,
+            'CurrentDisplayPrice' => [
+                'CurrencyCode' => 'USD',
+                'TotalAmount' => 0,
+            ],
+            'CurrentLoveDisplayPrice' => [
+                'TotalAmount' => 0,
+            ],
             'Description' => '',
-            'DownloadUrls' => [[
-                'Format' => 'EPUB3',
-                'Size' => $book->size_bytes,
-                'Url' => $this->settings->publicBaseUrl($request).'/kobo/'.$token.'/v1/books/'.$book->id.'/download',
-            ]],
+            'DownloadUrls' => $this->downloadUrls($book, $request, $token),
             'EntitlementId' => $book->id,
             'ExternalIds' => [],
-            'Genre' => 'Ebook',
+            'Genre' => '00000000-0000-0000-0000-000000000001',
+            'IsEligibleForKoboLove' => false,
             'IsInternetArchive' => false,
             'IsPreOrder' => false,
+            'IsSocialEnabled' => true,
             'Language' => 'en',
             'PhoneticPronunciations' => [],
             'PublicationDate' => $this->koboDate($book),
             'Publisher' => [
+                'Imprint' => '',
                 'Name' => 'Bookdrop',
             ],
             'RevisionId' => $book->id,
             'Title' => $book->title,
             'WorkId' => $book->id,
         ];
+    }
+
+    private function downloadUrls(Book $book, Request $request, string $token): array
+    {
+        $url = $this->settings->publicBaseUrl($request).'/kobo/'.$token.'/v1/books/'.$book->id.'/download';
+
+        return collect(['EPUB3', 'EPUB'])
+            ->map(fn (string $format): array => [
+                'DrmType' => 'None',
+                'Format' => $format,
+                'Size' => $book->size_bytes,
+                'Platform' => 'Generic',
+                'Url' => $url,
+            ])
+            ->all();
     }
 
     private function koboDate(Book $book): string
