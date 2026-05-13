@@ -40,12 +40,15 @@ ENV APACHE_DOCUMENT_ROOT=/var/www/html/public \
     DB_DATABASE=/data/database.sqlite \
     BOOKDROP_STORAGE_PATH=/data \
     BOOKDROP_BOOKS_PATH=books \
-    LOG_CHANNEL=stderr
+    LOG_CHANNEL=stderr \
+    LOG_LEVEL=warning
 
 RUN sed -ri -e 's!/var/www/html!${APACHE_DOCUMENT_ROOT}!g' /etc/apache2/sites-available/*.conf \
     && sed -ri -e 's!/var/www/!${APACHE_DOCUMENT_ROOT}/../!g' /etc/apache2/apache2.conf /etc/apache2/conf-available/*.conf \
+    && sed -ri -e 's!CustomLog \$\{APACHE_LOG_DIR\}/access.log combined!CustomLog ${APACHE_LOG_DIR}/access.log bookdrop_redacted!g' /etc/apache2/sites-available/*.conf \
+    && printf 'LogFormat "%h %l %u %t \\"%m [redacted] %H\\" %>s %O \\"%{User-Agent}i\\"" bookdrop_redacted\n' > /etc/apache2/conf-available/bookdrop-logs.conf \
     && printf '<Directory /var/www/html/public>\n    AllowOverride All\n    Require all granted\n</Directory>\n' > /etc/apache2/conf-available/bookdrop.conf \
-    && a2enconf bookdrop
+    && a2enconf bookdrop bookdrop-logs
 
 WORKDIR /var/www/html
 COPY --from=vendor /app ./

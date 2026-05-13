@@ -7,10 +7,11 @@ services:
       APP_NAME: Bookdrop
       APP_ENV: local
       APP_DEBUG: "true"
-      APP_KEY: base64:PjShUffb330Gr0swAYSUxRi/7KDasmVqyBjsRh7m8l8=
+      APP_KEY: ${APP_KEY:?APP_KEY required. Copy .env.example to .env and set APP_KEY to a base64 app key.}
       APP_URL: http://localhost:8080
       BOOKDROP_PUBLIC_BASE_URL: http://localhost:8080
       LOG_CHANNEL: stderr
+      LOG_LEVEL: warning
       DB_CONNECTION: sqlite
       DB_DATABASE: /data/database.sqlite
       BOOKDROP_STORAGE_PATH: /data

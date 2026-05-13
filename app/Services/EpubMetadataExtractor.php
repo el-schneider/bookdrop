@@ -54,7 +54,7 @@ class EpubMetadataExtractor
      */
     private function coverFromZipImages(string $path): ?array
     {
-        $zip = new ZipArchive();
+        $zip = new ZipArchive;
 
         if ($zip->open($path) !== true) {
             return null;

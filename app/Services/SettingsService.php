@@ -44,6 +44,8 @@ class SettingsService
             return rtrim($configured, '/');
         }
 
+        abort_if(app()->isProduction(), 500, 'BOOKDROP_PUBLIC_BASE_URL must be set in production.');
+
         if ($request !== null) {
             return rtrim($request->getSchemeAndHttpHost(), '/');
         }

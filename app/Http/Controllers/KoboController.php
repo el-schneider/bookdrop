@@ -7,7 +7,6 @@ use App\Services\EpubMetadataExtractor;
 use App\Services\SettingsService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Symfony\Component\HttpFoundation\BinaryFileResponse;
@@ -168,11 +167,6 @@ class KoboController extends Controller
     public function stub(Request $request, string $token, ?string $path = null): JsonResponse
     {
         $this->ensureValidToken($token);
-
-        Log::info('Unhandled Kobo endpoint stubbed.', [
-            'method' => $request->method(),
-            'path' => $request->path(),
-        ]);
 
         return response()->json([]);
     }

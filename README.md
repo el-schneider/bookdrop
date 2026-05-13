@@ -7,6 +7,8 @@ Minimal self-hosted EPUB dropzone with a Kobo-compatible sync endpoint.
 No host PHP, Composer, or Node required:
 
 ```bash
+cp .env.example .env
+perl -0pi -e 's/^APP_KEY=$/APP_KEY=base64:'"$(openssl rand -base64 32)"'/m' .env
 docker compose up --build
 ```
 
@@ -30,7 +32,22 @@ Uploaded books are stored privately and served only through tokenized Kobo downl
 
 ## CapRover deployment on `reef`
 
-This repo contains `captain-definition` for CapRover repository builds. The production container listens on port `80`; keep CapRover's **Container HTTP Port** set to `80` and enable HTTPS in CapRover.
+Production deploys are handled by GitHub Actions on every push to `main`:
+
+1. Run Composer/npm setup and PHPUnit.
+2. Build the Docker image on GitHub Actions with layer caching.
+3. Push the image to GitHub Container Registry (`ghcr.io`).
+4. Ask CapRover to deploy that immutable image tag.
+
+Required GitHub repository secrets:
+
+- `CAPROVER_SERVER`: CapRover captain URL, for example `https://captain.example.com`.
+- `CAPROVER_APP`: CapRover app name, for example `bookdrop`.
+- `CAPROVER_APP_TOKEN`: app deployment token from the CapRover Deployment tab.
+
+CapRover must be able to pull the GHCR image. Either make the package public, or add `ghcr.io` as a private registry in CapRover using a GitHub token with package read access.
+
+This repo also keeps `captain-definition` as a source-build fallback. The production container listens on port `80`; keep CapRover's **Container HTTP Port** set to `80` and enable HTTPS in CapRover.
 
 Required CapRover settings:
 
@@ -42,8 +59,9 @@ Required CapRover settings:
   - `APP_ENV=production`
   - `APP_DEBUG=false`
   - `APP_KEY=<output of php artisan key:generate --show>`
+  - `LOG_LEVEL=warning`
   - `APP_URL=https://your-bookdrop-domain.example`
-  - `BOOKDROP_PUBLIC_BASE_URL=https://your-bookdrop-domain.example`
+  - `BOOKDROP_PUBLIC_BASE_URL=https://your-bookdrop-domain.example` (required in production)
   - `DB_CONNECTION=sqlite`
   - `DB_DATABASE=/data/database.sqlite`
   - `BOOKDROP_STORAGE_PATH=/data`
