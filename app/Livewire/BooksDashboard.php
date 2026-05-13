@@ -20,7 +20,7 @@ class BooksDashboard extends Component
     /** @var array<int, TemporaryUploadedFile> */
     public array $uploads = [];
 
-    public function upload(): void
+    public function saveUploads(): void
     {
         $metadataExtractor = app(EpubMetadataExtractor::class);
 
@@ -31,6 +31,8 @@ class BooksDashboard extends Component
 
         foreach ($this->uploads as $upload) {
             if (strtolower($upload->getClientOriginalExtension()) !== 'epub') {
+                $this->reset('uploads');
+
                 throw ValidationException::withMessages([
                     'uploads' => 'Only .epub files can be uploaded.',
                 ]);

@@ -18,34 +18,55 @@ api_endpoint={{ $apiEndpoint }}</pre>
     </section>
 
     <section class="bg-white shadow-sm sm:rounded-lg">
-        <form wire:submit="upload" class="space-y-4 p-6">
+        <div data-bookdrop-upload class="space-y-4 p-6">
             <div>
                 <h3 class="text-lg font-medium text-gray-900">Upload EPUBs</h3>
-                <p class="mt-1 text-sm text-gray-600">Only DRM-free <code>.epub</code> files are accepted.</p>
+                <p class="mt-1 text-sm text-gray-600">Drop one or more DRM-free <code>.epub</code> files here. Upload starts automatically.</p>
             </div>
 
-            <label class="flex cursor-pointer flex-col items-center justify-center rounded-lg border-2 border-dashed border-gray-300 px-6 py-10 text-center hover:border-indigo-400">
-                <span class="text-sm font-medium text-gray-700">Choose one or more EPUB files</span>
-                <span class="mt-1 text-xs text-gray-500">Files are stored privately and exposed only through the tokenized Kobo endpoint.</span>
-                <input wire:model="uploads" type="file" multiple accept=".epub" class="sr-only">
-            </label>
+            <div
+                data-testid="bookdrop-dropzone"
+                data-bookdrop-dropzone
+                role="button"
+                tabindex="0"
+                class="flex cursor-pointer flex-col items-center justify-center rounded-xl border-2 border-dashed border-gray-300 bg-gray-50 px-6 py-12 text-center transition hover:border-indigo-400 hover:bg-indigo-50"
+            >
+                <input
+                    data-bookdrop-input
+                    wire:model="uploads"
+                    type="file"
+                    multiple
+                    accept=".epub,application/epub+zip"
+                    class="sr-only"
+                >
 
-            <div wire:loading wire:target="uploads" class="text-sm text-gray-600">Preparing upload...</div>
-            <div wire:loading wire:target="upload" class="text-sm text-gray-600">Saving...</div>
+                <div class="text-base font-semibold text-gray-900">Drop EPUB files here</div>
+                <div class="mt-1 text-sm text-gray-600">or click to choose files</div>
+                <div class="mt-3 text-xs text-gray-500">Max 100 MB per file. Files stay private and sync through the Kobo token.</div>
+            </div>
+
+            <div data-bookdrop-queue class="hidden rounded-md border border-gray-200 bg-white p-4">
+                <div class="text-sm font-medium text-gray-900">Queued files</div>
+                <ul data-bookdrop-file-list class="mt-2 list-disc space-y-1 pl-5 text-sm text-gray-700"></ul>
+            </div>
+
+            <div data-bookdrop-progress class="hidden space-y-2">
+                <div class="flex justify-between text-sm text-gray-700">
+                    <span>Uploading...</span>
+                    <span data-bookdrop-progress-label>0%</span>
+                </div>
+                <div class="h-2 overflow-hidden rounded-full bg-gray-200">
+                    <div data-bookdrop-progress-bar class="h-full rounded-full bg-indigo-600 transition-all" style="width: 0%"></div>
+                </div>
+            </div>
+
+            <button type="button" wire:click="saveUploads" data-bookdrop-save class="hidden">Save uploaded books</button>
+
+            <div wire:loading wire:target="saveUploads" class="text-sm text-gray-600">Saving metadata and adding books...</div>
 
             <x-input-error :messages="$errors->get('uploads')" />
             <x-input-error :messages="$errors->get('uploads.*')" />
-
-            @if ($uploads !== [])
-                <ul class="list-disc space-y-1 pl-5 text-sm text-gray-700">
-                    @foreach ($uploads as $upload)
-                        <li>{{ $upload->getClientOriginalName() }}</li>
-                    @endforeach
-                </ul>
-            @endif
-
-            <x-primary-button type="submit">Upload</x-primary-button>
-        </form>
+        </div>
     </section>
 
     <section class="bg-white shadow-sm sm:rounded-lg">
