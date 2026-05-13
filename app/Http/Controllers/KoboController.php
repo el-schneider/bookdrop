@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Models\Book;
+use App\Services\EpubMetadataExtractor;
 use App\Services\SettingsService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -10,6 +11,7 @@ use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Symfony\Component\HttpFoundation\BinaryFileResponse;
+use Symfony\Component\HttpFoundation\Response;
 
 class KoboController extends Controller
 {
@@ -43,7 +45,8 @@ class KoboController extends Controller
                 'delete_entitlement' => $base.'/v1/library/{Ids}',
                 'post_analytics_event' => $base.'/v1/analytics/event',
                 'image_host' => $this->settings->publicBaseUrl($request),
-                'image_url_template' => '',
+                'image_url_template' => $base.'/{ImageId}/{width}/{height}/false/image.jpg',
+                'image_url_quality_template' => $base.'/{ImageId}/{width}/{height}/{Quality}/false/image.jpg',
             ],
         ])->header('x-kobo-apitoken', $token);
     }
@@ -142,6 +145,24 @@ class KoboController extends Controller
             $book->original_filename,
             ['Content-Type' => 'application/epub+zip']
         );
+    }
+
+    public function cover(string $token, string $bookId, string $width, string $height, ?string $quality = null, ?string $isGreyscale = null): Response
+    {
+        $this->ensureValidToken($token);
+        $book = $this->findBook($bookId);
+
+        $this->abortIfMissingFile($book);
+
+        $cover = app(EpubMetadataExtractor::class)->cover(
+            Storage::disk((string) config('bookdrop.storage_disk'))->path($book->stored_path)
+        );
+
+        abort_unless($cover, 404);
+
+        return response($cover['data'])
+            ->header('Content-Type', $cover['mime'])
+            ->header('Cache-Control', 'public, max-age=31536000');
     }
 
     public function stub(Request $request, string $token, ?string $path = null): JsonResponse

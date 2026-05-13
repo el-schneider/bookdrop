@@ -28,6 +28,27 @@ class EpubMetadataExtractor
     }
 
     /**
+     * @return array{data: string, mime: string}|null
+     */
+    public function cover(string $path): ?array
+    {
+        try {
+            $cover = (new EPub($path))->getCoverInfo();
+
+            if (! $cover['found'] || ! is_string($cover['data']) || $cover['data'] === '') {
+                return null;
+            }
+
+            return [
+                'data' => $cover['data'],
+                'mime' => is_string($cover['mime']) && $cover['mime'] !== '' ? $cover['mime'] : 'image/jpeg',
+            ];
+        } catch (Throwable) {
+            return null;
+        }
+    }
+
+    /**
      * @param  array<mixed>  $authors
      */
     private function formatAuthors(array $authors): ?string

@@ -24,6 +24,8 @@ Route::prefix('kobo/{token}')->group(function (): void {
     Route::delete('v1/library/{bookId}', [KoboController::class, 'deleteEntitlement'])->name('kobo.library.delete');
     Route::match(['post', 'put'], 'v1/analytics/{path?}', [KoboController::class, 'analytics'])->where('path', '.*')->name('kobo.analytics');
     Route::get('v1/books/{bookId}/download', [KoboController::class, 'download'])->name('kobo.books.download');
+    Route::get('{bookId}/{width}/{height}/{isGreyscale}/image.jpg', [KoboController::class, 'cover'])->name('kobo.books.cover');
+    Route::get('{bookId}/{width}/{height}/{quality}/{isGreyscale}/image.jpg', [KoboController::class, 'cover'])->name('kobo.books.cover.quality');
     Route::any('{path}', [KoboController::class, 'stub'])->where('path', '.*')->name('kobo.stub');
 });
 
