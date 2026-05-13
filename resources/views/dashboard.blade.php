@@ -1,12 +1,16 @@
 <x-app-layout>
     <x-slot name="header">
-        <h2 class="font-semibold text-xl text-gray-800 leading-tight">
-            {{ __('Bookdrop') }}
-        </h2>
+        <div class="grid gap-8 md:grid-cols-[1fr_auto] md:items-end">
+            <div class="space-y-5">
+                <p class="bd-eyebrow">Private shelf</p>
+                <h1 class="bd-heading">Your Kobo shelf.</h1>
+            </div>
+            <p class="max-w-sm bd-subhead md:text-right">Upload EPUBs here. Sync them from the reader when the shelf changes.</p>
+        </div>
     </x-slot>
 
-    <div class="py-12">
-        <div class="max-w-7xl mx-auto sm:px-6 lg:px-8">
+    <div class="py-10 md:py-14">
+        <div class="bd-container">
             <livewire:books-dashboard />
         </div>
     </div>

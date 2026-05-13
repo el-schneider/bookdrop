@@ -5,26 +5,40 @@
         <meta name="viewport" content="width=device-width, initial-scale=1">
         <meta name="csrf-token" content="{{ csrf_token() }}">
 
-        <title>{{ config('app.name', 'Laravel') }}</title>
+        <title>Bookdrop</title>
+        <link rel="icon" type="image/svg+xml" href="{{ asset('favicon.svg') }}">
 
-        <!-- Fonts -->
-        <link rel="preconnect" href="https://fonts.bunny.net">
-        <link href="https://fonts.bunny.net/css?family=figtree:400,500,600&display=swap" rel="stylesheet" />
+        <script>
+            (() => {
+                const stored = localStorage.getItem('bookdrop-theme');
+                const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+                document.documentElement.classList.toggle('dark', stored ? stored === 'dark' : prefersDark);
+            })();
+        </script>
 
-        <!-- Scripts -->
         @vite(['resources/css/app.css', 'resources/js/app.js'])
     </head>
-    <body class="font-sans text-gray-900 antialiased">
-        <div class="min-h-screen flex flex-col sm:justify-center items-center pt-6 sm:pt-0 bg-gray-100">
-            <div>
-                <a href="/" wire:navigate>
-                    <x-application-logo class="w-20 h-20 fill-current text-gray-500" />
-                </a>
-            </div>
+    <body>
+        <div class="bd-page flex min-h-screen flex-col">
+            <header class="border-b" style="border-color: var(--rule)">
+                <div class="bd-container flex items-center justify-between py-5">
+                    <a href="/" wire:navigate class="bd-link no-underline">Bookdrop</a>
+                    <button type="button" class="bd-theme-toggle" data-theme-toggle>Dark</button>
+                </div>
+            </header>
 
-            <div class="w-full sm:max-w-md mt-6 px-6 py-4 bg-white shadow-md overflow-hidden sm:rounded-lg">
-                {{ $slot }}
-            </div>
+            <main class="flex flex-1 items-center py-12 md:py-20">
+                <div class="bd-container-narrow">
+                    <div class="mb-10 space-y-5">
+                        <p class="bd-eyebrow">Private shelf</p>
+                        <h1 class="display-type text-5xl md:text-6xl">Send books to your reader.</h1>
+                    </div>
+
+                    <div class="bd-rule-panel bd-section">
+                        {{ $slot }}
+                    </div>
+                </div>
+            </main>
         </div>
     </body>
 </html>

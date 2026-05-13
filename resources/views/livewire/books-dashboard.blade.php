@@ -1,27 +1,31 @@
-<div class="space-y-6">
+<div class="space-y-8">
     @if (session('status'))
-        <div class="rounded-md bg-green-50 p-4 text-sm text-green-800">
+        <div class="bd-rule-panel p-4 bd-subhead">
             {{ session('status') }}
         </div>
     @endif
 
-    <section class="bg-white shadow-sm sm:rounded-lg">
-        <div class="space-y-4 p-6">
-            <div>
-                <h3 class="text-lg font-medium text-gray-900">Kobo configuration</h3>
-                <p class="mt-1 text-sm text-gray-600">Put this in <code>.kobo/Kobo/Kobo eReader.conf</code> under <code>[OneStoreServices]</code>.</p>
+    <section class="bd-rule-panel">
+        <div class="bd-section grid gap-8 md:grid-cols-[0.36fr_0.64fr]">
+            <div class="space-y-3">
+                <p class="bd-eyebrow">Reader endpoint</p>
+                <h2 class="text-base font-normal">Kobo configuration</h2>
+                <p class="bd-subhead">Put this in <code>.kobo/Kobo/Kobo eReader.conf</code> under <code>[OneStoreServices]</code>.</p>
             </div>
 
-            <pre class="overflow-x-auto rounded-md bg-gray-900 p-4 text-sm text-gray-100">[OneStoreServices]
+            <pre class="bd-code overflow-x-auto">[OneStoreServices]
 api_endpoint={{ $apiEndpoint }}</pre>
         </div>
     </section>
 
-    <section class="bg-white shadow-sm sm:rounded-lg">
-        <div data-bookdrop-upload class="space-y-4 p-6">
-            <div>
-                <h3 class="text-lg font-medium text-gray-900">Upload EPUBs</h3>
-                <p class="mt-1 text-sm text-gray-600">Drop one or more DRM-free <code>.epub</code> files here. Upload starts automatically.</p>
+    <section class="bd-rule-panel">
+        <div data-bookdrop-upload class="bd-section space-y-6">
+            <div class="grid gap-4 md:grid-cols-[0.36fr_0.64fr]">
+                <div class="space-y-3">
+                    <p class="bd-eyebrow">Add books</p>
+                    <h2 class="text-base font-normal">Upload EPUBs</h2>
+                </div>
+                <p class="bd-subhead">Drop one or more DRM-free <code>.epub</code> files here. Upload starts automatically. Files stay private and sync through the Kobo token.</p>
             </div>
 
             <div
@@ -29,7 +33,8 @@ api_endpoint={{ $apiEndpoint }}</pre>
                 data-bookdrop-dropzone
                 role="button"
                 tabindex="0"
-                class="flex cursor-pointer flex-col items-center justify-center rounded-xl border-2 border-dashed border-gray-300 bg-gray-50 px-6 py-12 text-center transition hover:border-indigo-400 hover:bg-indigo-50"
+                class="cursor-pointer border border-dashed px-6 py-12 text-center transition-colors"
+                style="border-color: var(--rule); background: var(--field)"
             >
                 <input
                     data-bookdrop-input
@@ -40,71 +45,76 @@ api_endpoint={{ $apiEndpoint }}</pre>
                     class="sr-only"
                 >
 
-                <div class="text-base font-semibold text-gray-900">Drop EPUB files here</div>
-                <div class="mt-1 text-sm text-gray-600">or click to choose files</div>
-                <div class="mt-3 text-xs text-gray-500">Max 100 MB per file. Files stay private and sync through the Kobo token.</div>
+                <div class="display-type text-3xl md:text-4xl">Drop EPUB files here</div>
+                <div class="mt-4 bd-subhead">or click to choose files · max 100 MB per file</div>
             </div>
 
-            <div data-bookdrop-queue class="hidden rounded-md border border-gray-200 bg-white p-4">
-                <div class="text-sm font-medium text-gray-900">Queued files</div>
-                <ul data-bookdrop-file-list class="mt-2 list-disc space-y-1 pl-5 text-sm text-gray-700"></ul>
+            <div data-bookdrop-queue class="bd-rule-panel hidden p-4">
+                <div class="bd-eyebrow">Queued files</div>
+                <ul data-bookdrop-file-list class="mt-3 space-y-2 bd-subhead"></ul>
             </div>
 
-            <div data-bookdrop-progress class="hidden space-y-2">
-                <div class="flex justify-between text-sm text-gray-700">
+            <div data-bookdrop-progress class="hidden space-y-3">
+                <div class="flex justify-between bd-subhead">
                     <span>Uploading...</span>
                     <span data-bookdrop-progress-label>0%</span>
                 </div>
-                <div class="h-2 overflow-hidden rounded-full bg-gray-200">
-                    <div data-bookdrop-progress-bar class="h-full rounded-full bg-indigo-600 transition-all" style="width: 0%"></div>
+                <div class="h-px bg-[var(--rule)]">
+                    <div data-bookdrop-progress-bar class="h-px bg-[var(--ink)] transition-all" style="width: 0%"></div>
                 </div>
             </div>
 
             <button type="button" wire:click="saveUploads" data-bookdrop-save class="hidden">Save uploaded books</button>
 
-            <div wire:loading wire:target="saveUploads" class="text-sm text-gray-600">Saving metadata and adding books...</div>
+            <div wire:loading wire:target="saveUploads" class="bd-subhead">Saving metadata and adding books...</div>
 
             <x-input-error :messages="$errors->get('uploads')" />
             <x-input-error :messages="$errors->get('uploads.*')" />
         </div>
     </section>
 
-    <section class="bg-white shadow-sm sm:rounded-lg">
-        <div class="p-6">
-            <h3 class="text-lg font-medium text-gray-900">Books</h3>
+    <section class="bd-rule-panel">
+        <div class="bd-section">
+            <div class="mb-6 flex items-end justify-between gap-4">
+                <div class="space-y-3">
+                    <p class="bd-eyebrow">Library</p>
+                    <h2 class="text-base font-normal">Books</h2>
+                </div>
+                <p class="bd-subhead">{{ $books->count() }} {{ \Illuminate\Support\Str::plural('file', $books->count()) }}</p>
+            </div>
 
-            <div class="mt-4 overflow-x-auto">
-                <table class="min-w-full divide-y divide-gray-200 text-sm">
+            <div class="overflow-x-auto">
+                <table class="bd-table min-w-full">
                     <thead>
-                        <tr class="text-left text-xs font-medium uppercase tracking-wider text-gray-500">
-                            <th class="py-3 pe-4">Title</th>
-                            <th class="px-4 py-3">Author</th>
-                            <th class="px-4 py-3">Filename</th>
-                            <th class="px-4 py-3">Uploaded</th>
-                            <th class="px-4 py-3">Sync</th>
-                            <th class="py-3 ps-4 text-right">Actions</th>
+                        <tr>
+                            <th>Title</th>
+                            <th>Author</th>
+                            <th>Filename</th>
+                            <th>Uploaded</th>
+                            <th>Sync</th>
+                            <th class="text-right">Actions</th>
                         </tr>
                     </thead>
-                    <tbody class="divide-y divide-gray-100">
+                    <tbody>
                         @forelse ($books as $book)
                             <tr>
-                                <td class="py-3 pe-4 font-medium text-gray-900">{{ $book->title }}</td>
-                                <td class="px-4 py-3 text-gray-700">{{ $book->author ?: '—' }}</td>
-                                <td class="px-4 py-3 text-gray-700">{{ $book->original_filename }}</td>
-                                <td class="px-4 py-3 text-gray-700">{{ $book->uploaded_at?->toDayDateTimeString() }}</td>
-                                <td class="px-4 py-3">
+                                <td class="font-medium">{{ $book->title }}</td>
+                                <td class="bd-muted">{{ $book->author ?: '—' }}</td>
+                                <td class="bd-muted">{{ $book->original_filename }}</td>
+                                <td class="bd-muted">{{ $book->uploaded_at?->toDayDateTimeString() }}</td>
+                                <td>
                                     @if (\Illuminate\Support\Facades\Storage::disk($disk)->exists($book->stored_path))
-                                        <span class="rounded-full bg-green-100 px-2 py-1 text-xs font-medium text-green-800">Active</span>
+                                        <span class="bd-status">Active</span>
                                     @else
-                                        <span class="rounded-full bg-red-100 px-2 py-1 text-xs font-medium text-red-800">Missing file</span>
+                                        <span class="bd-status">Missing file</span>
                                     @endif
                                 </td>
-                                <td class="py-3 ps-4 text-right">
+                                <td class="text-right">
                                     <button
                                         type="button"
                                         wire:click="delete('{{ $book->id }}')"
                                         wire:confirm="Delete this book?"
-                                        class="text-sm font-medium text-red-600 hover:text-red-900"
+                                        class="bd-link"
                                     >
                                         Delete
                                     </button>
@@ -112,7 +122,7 @@ api_endpoint={{ $apiEndpoint }}</pre>
                             </tr>
                         @empty
                             <tr>
-                                <td colspan="6" class="py-8 text-center text-gray-500">No books uploaded yet.</td>
+                                <td colspan="6" class="py-10 text-center bd-subhead">No books uploaded yet.</td>
                             </tr>
                         @endforelse
                     </tbody>
