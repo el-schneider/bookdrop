@@ -5,7 +5,8 @@ WORKDIR /app
 COPY composer.json composer.lock ./
 RUN composer install --no-dev --no-interaction --prefer-dist --no-progress --no-scripts --optimize-autoloader
 COPY . .
-RUN composer dump-autoload --no-dev --no-interaction --optimize
+RUN mkdir -p storage/framework/cache storage/framework/sessions storage/framework/views bootstrap/cache \
+    && composer dump-autoload --no-dev --no-interaction --optimize
 
 FROM node:22-alpine AS assets
 WORKDIR /app
