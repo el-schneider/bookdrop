@@ -77,7 +77,7 @@ class KoboController extends Controller
 
         $this->abortIfMissingFile($book);
 
-        return response()->json($this->bookMetadata($book, $request, $token));
+        return response()->json([$this->bookMetadata($book, $request, $token)]);
     }
 
     public function getState(string $token, string $bookId): JsonResponse
