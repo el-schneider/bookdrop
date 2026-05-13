@@ -1,3 +1,33 @@
+function applyStoredTheme() {
+    const stored = localStorage.getItem('bookdrop-theme')
+    const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches
+
+    document.documentElement.classList.toggle('dark', stored ? stored === 'dark' : prefersDark)
+}
+
+function initThemeToggle(root = document) {
+    root.querySelectorAll('[data-theme-toggle]').forEach((button) => {
+        if (button.dataset.themeInitialized === 'true') return
+
+        button.dataset.themeInitialized = 'true'
+
+        const syncLabel = () => {
+            button.textContent = document.documentElement.classList.contains('dark') ? 'Light' : 'Dark'
+        }
+
+        syncLabel()
+
+        button.addEventListener('click', () => {
+            const useDark = ! document.documentElement.classList.contains('dark')
+            document.documentElement.classList.toggle('dark', useDark)
+            localStorage.setItem('bookdrop-theme', useDark ? 'dark' : 'light')
+            syncLabel()
+        })
+    })
+}
+
+applyStoredTheme()
+
 function initBookdropUpload(root = document) {
     root.querySelectorAll('[data-bookdrop-upload]').forEach((container) => {
         if (container.dataset.bookdropInitialized === 'true') {
@@ -60,14 +90,14 @@ function initBookdropUpload(root = document) {
         })
         dropzone.addEventListener('dragover', (event) => {
             event.preventDefault()
-            dropzone.classList.add('border-indigo-500', 'bg-indigo-50')
+            dropzone.classList.add('is-dragging')
         })
         dropzone.addEventListener('dragleave', () => {
-            dropzone.classList.remove('border-indigo-500', 'bg-indigo-50')
+            dropzone.classList.remove('is-dragging')
         })
         dropzone.addEventListener('drop', (event) => {
             event.preventDefault()
-            dropzone.classList.remove('border-indigo-500', 'bg-indigo-50')
+            dropzone.classList.remove('is-dragging')
 
             const files = event.dataTransfer?.files
             if (! files?.length) return
@@ -91,6 +121,15 @@ function initBookdropUpload(root = document) {
     })
 }
 
-document.addEventListener('DOMContentLoaded', () => initBookdropUpload())
-document.addEventListener('livewire:navigated', () => initBookdropUpload())
-document.addEventListener('livewire:init', () => initBookdropUpload())
+document.addEventListener('DOMContentLoaded', () => {
+    initThemeToggle()
+    initBookdropUpload()
+})
+document.addEventListener('livewire:navigated', () => {
+    initThemeToggle()
+    initBookdropUpload()
+})
+document.addEventListener('livewire:init', () => {
+    initThemeToggle()
+    initBookdropUpload()
+})
