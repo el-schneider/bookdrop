@@ -13,8 +13,11 @@
                 <p class="bd-subhead">Put this in <code>.kobo/Kobo/Kobo eReader.conf</code> under <code>[OneStoreServices]</code>.</p>
             </div>
 
-            <pre class="bd-code overflow-x-auto">[OneStoreServices]
+            <div class="min-w-0 space-y-3">
+                <pre class="bd-code overflow-x-auto" data-copy-source="kobo-endpoint">[OneStoreServices]
 api_endpoint={{ $apiEndpoint }}</pre>
+                <button type="button" class="bd-button-secondary" data-copy-button data-copy-target="kobo-endpoint">Copy endpoint</button>
+            </div>
         </div>
     </section>
 
@@ -45,7 +48,7 @@ api_endpoint={{ $apiEndpoint }}</pre>
                     class="sr-only"
                 >
 
-                <div class="display-type text-3xl md:text-4xl">Drop EPUB files here</div>
+                <div class="text-3xl md:text-4xl">Drop EPUB files here</div>
                 <div class="mt-4 bd-subhead">or click to choose files · max 100 MB per file</div>
             </div>
 
@@ -70,64 +73,6 @@ api_endpoint={{ $apiEndpoint }}</pre>
 
             <x-input-error :messages="$errors->get('uploads')" />
             <x-input-error :messages="$errors->get('uploads.*')" />
-        </div>
-    </section>
-
-    <section class="bd-rule-panel">
-        <div class="bd-section">
-            <div class="mb-6 flex items-end justify-between gap-4">
-                <div class="space-y-3">
-                    <p class="bd-eyebrow">Library</p>
-                    <h2 class="text-base font-normal">Books</h2>
-                </div>
-                <p class="bd-subhead">{{ $books->count() }} {{ \Illuminate\Support\Str::plural('file', $books->count()) }}</p>
-            </div>
-
-            <div class="overflow-x-auto">
-                <table class="bd-table min-w-full">
-                    <thead>
-                        <tr>
-                            <th>Title</th>
-                            <th>Author</th>
-                            <th>Filename</th>
-                            <th>Uploaded</th>
-                            <th>Sync</th>
-                            <th class="text-right">Actions</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        @forelse ($books as $book)
-                            <tr>
-                                <td class="font-medium">{{ $book->title }}</td>
-                                <td class="bd-muted">{{ $book->author ?: '—' }}</td>
-                                <td class="bd-muted">{{ $book->original_filename }}</td>
-                                <td class="bd-muted">{{ $book->uploaded_at?->toDayDateTimeString() }}</td>
-                                <td>
-                                    @if (\Illuminate\Support\Facades\Storage::disk($disk)->exists($book->stored_path))
-                                        <span class="bd-status">Active</span>
-                                    @else
-                                        <span class="bd-status">Missing file</span>
-                                    @endif
-                                </td>
-                                <td class="text-right">
-                                    <button
-                                        type="button"
-                                        wire:click="delete('{{ $book->id }}')"
-                                        wire:confirm="Delete this book?"
-                                        class="bd-link"
-                                    >
-                                        Delete
-                                    </button>
-                                </td>
-                            </tr>
-                        @empty
-                            <tr>
-                                <td colspan="6" class="py-10 text-center bd-subhead">No books uploaded yet.</td>
-                            </tr>
-                        @endforelse
-                    </tbody>
-                </table>
-            </div>
         </div>
     </section>
 </div>

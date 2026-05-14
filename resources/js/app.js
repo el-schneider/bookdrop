@@ -28,6 +28,39 @@ function initThemeToggle(root = document) {
 
 applyStoredTheme()
 
+function initCopyButtons(root = document) {
+    root.querySelectorAll('[data-copy-button]').forEach((button) => {
+        if (button.dataset.copyInitialized === 'true') return
+
+        button.dataset.copyInitialized = 'true'
+
+        const originalLabel = button.textContent
+
+        button.addEventListener('click', async () => {
+            const source = root.querySelector(`[data-copy-source="${button.dataset.copyTarget}"]`)
+            if (! source) return
+
+            button.textContent = 'Copied'
+            setTimeout(() => {
+                button.textContent = originalLabel
+            }, 1800)
+
+            try {
+                await navigator.clipboard.writeText(source.textContent.trim())
+            } catch {
+                const textarea = document.createElement('textarea')
+                textarea.value = source.textContent.trim()
+                textarea.style.position = 'fixed'
+                textarea.style.left = '-9999px'
+                document.body.appendChild(textarea)
+                textarea.select()
+                document.execCommand('copy')
+                textarea.remove()
+            }
+        })
+    })
+}
+
 function initBookdropUpload(root = document) {
     root.querySelectorAll('[data-bookdrop-upload]').forEach((container) => {
         if (container.dataset.bookdropInitialized === 'true') {
@@ -123,13 +156,16 @@ function initBookdropUpload(root = document) {
 
 document.addEventListener('DOMContentLoaded', () => {
     initThemeToggle()
+    initCopyButtons()
     initBookdropUpload()
 })
 document.addEventListener('livewire:navigated', () => {
     initThemeToggle()
+    initCopyButtons()
     initBookdropUpload()
 })
 document.addEventListener('livewire:init', () => {
     initThemeToggle()
+    initCopyButtons()
     initBookdropUpload()
 })

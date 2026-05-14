@@ -2,7 +2,6 @@
 
 namespace App\Livewire;
 
-use App\Models\Book;
 use App\Services\EpubMetadataExtractor;
 use App\Services\SettingsService;
 use Illuminate\Support\Facades\Storage;
@@ -51,24 +50,12 @@ class BooksDashboard extends Component
         session()->flash('status', trans_choice(':count EPUB uploaded.|:count EPUBs uploaded.', $count, ['count' => $count]));
     }
 
-    public function delete(string $bookId): void
-    {
-        $book = Book::query()->findOrFail($bookId);
-
-        Storage::disk((string) config('bookdrop.storage_disk'))->delete($book->stored_path);
-        $book->delete();
-
-        session()->flash('status', 'Book deleted.');
-    }
-
     public function render(): View
     {
         $settings = app(SettingsService::class);
 
         return view('livewire.books-dashboard', [
-            'books' => Book::query()->orderByDesc('uploaded_at')->get(),
             'apiEndpoint' => $settings->koboEndpoint(request()),
-            'disk' => (string) config('bookdrop.storage_disk'),
         ]);
     }
 

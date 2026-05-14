@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\KoboController;
+use App\Http\Controllers\LibraryCoverController;
 use Illuminate\Support\Facades\Route;
 
 Route::view('/', 'welcome');
@@ -8,6 +9,14 @@ Route::view('/', 'welcome');
 Route::view('dashboard', 'dashboard')
     ->middleware(['auth', 'verified'])
     ->name('dashboard');
+
+Route::view('library', 'library')
+    ->middleware(['auth', 'verified'])
+    ->name('library');
+
+Route::get('library/books/{book}/cover', LibraryCoverController::class)
+    ->middleware(['auth', 'verified'])
+    ->name('library.books.cover');
 
 Route::view('profile', 'profile')
     ->middleware(['auth'])
