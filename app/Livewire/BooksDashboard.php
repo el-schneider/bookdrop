@@ -2,6 +2,7 @@
 
 namespace App\Livewire;
 
+use App\Models\Book;
 use App\Services\EpubMetadataExtractor;
 use App\Services\SettingsService;
 use Illuminate\Support\Facades\Storage;
