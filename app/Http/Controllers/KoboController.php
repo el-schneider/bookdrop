@@ -38,6 +38,8 @@ class KoboController extends Controller
 
         return response()->json([
             'Resources' => [
+                'device_auth' => $base.'/v1/auth/device',
+                'device_refresh' => $base.'/v1/auth/refresh',
                 'library_sync' => $base.'/v1/library/sync',
                 'library_metadata' => $base.'/v1/library/{Ids}/metadata',
                 'reading_state' => $base.'/v1/library/{Ids}/state',
