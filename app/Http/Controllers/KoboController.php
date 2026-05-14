@@ -49,7 +49,7 @@ class KoboController extends Controller
                 'image_url_template' => $base.'/{ImageId}/{width}/{height}/false/image.jpg',
                 'image_url_quality_template' => $base.'/{ImageId}/{width}/{height}/{Quality}/false/image.jpg',
             ],
-        ])->header('x-kobo-apitoken', $token);
+        ])->header('x-kobo-apitoken', 'e30=');
     }
 
     public function sync(Request $request, string $token): JsonResponse
