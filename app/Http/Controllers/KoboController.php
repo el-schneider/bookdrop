@@ -75,9 +75,11 @@ class KoboController extends Controller
     public function metadata(Request $request, string $token, string $bookId): JsonResponse
     {
         $this->ensureValidToken($token);
-        $book = $this->findBook($bookId);
+        $book = Book::query()->whereKey($bookId)->first();
 
-        $this->abortIfMissingFile($book);
+        if (! $book || ! $this->bookFileExists($book)) {
+            return response()->json([]);
+        }
 
         return response()->json([$this->bookMetadata($book, $request, $token)]);
     }
@@ -149,15 +151,19 @@ class KoboController extends Controller
     public function cover(string $token, string $bookId, string $width, string $height, ?string $quality = null, ?string $isGreyscale = null): Response
     {
         $this->ensureValidToken($token);
-        $book = $this->findBook($bookId);
+        $book = Book::query()->whereKey($bookId)->first();
 
-        $this->abortIfMissingFile($book);
+        if (! $book || ! $this->bookFileExists($book)) {
+            return $this->placeholderCover();
+        }
 
         $cover = app(EpubMetadataExtractor::class)->cover(
             Storage::disk((string) config('bookdrop.storage_disk'))->path($book->stored_path)
         );
 
-        abort_unless($cover, 404);
+        if (! $cover) {
+            return $this->placeholderCover();
+        }
 
         return response($cover['data'])
             ->header('Content-Type', $cover['mime'])
@@ -194,7 +200,19 @@ class KoboController extends Controller
 
     private function abortIfMissingFile(Book $book): void
     {
-        abort_unless(Storage::disk((string) config('bookdrop.storage_disk'))->exists($book->stored_path), 404);
+        abort_unless($this->bookFileExists($book), 404);
+    }
+
+    private function bookFileExists(Book $book): bool
+    {
+        return Storage::disk((string) config('bookdrop.storage_disk'))->exists($book->stored_path);
+    }
+
+    private function placeholderCover(): Response
+    {
+        return response(base64_decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII='))
+            ->header('Content-Type', 'image/png')
+            ->header('Cache-Control', 'public, max-age=300');
     }
 
     private function bookEntitlement(Book $book): array
