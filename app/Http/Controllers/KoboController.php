@@ -5,8 +5,10 @@ namespace App\Http\Controllers;
 use App\Models\Book;
 use App\Services\EpubMetadataExtractor;
 use App\Services\SettingsService;
+use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Symfony\Component\HttpFoundation\BinaryFileResponse;
@@ -57,9 +59,7 @@ class KoboController extends Controller
         $this->ensureValidToken($token);
 
         $disk = Storage::disk((string) config('bookdrop.storage_disk'));
-        $books = Book::query()
-            ->orderBy('uploaded_at')
-            ->get()
+        $books = $this->booksForSync($request)
             ->filter(fn (Book $book): bool => $disk->exists($book->stored_path))
             ->map(fn (Book $book): array => [
                 'NewEntitlement' => [
@@ -215,6 +215,18 @@ class KoboController extends Controller
         return response(base64_decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII='))
             ->header('Content-Type', 'image/png')
             ->header('Cache-Control', 'public, max-age=300');
+    }
+
+    private function booksForSync(Request $request): Collection
+    {
+        $query = Book::query()->orderBy('uploaded_at');
+        $syncToken = $request->header('x-kobo-synctoken');
+
+        if (filled($syncToken)) {
+            $query->where('uploaded_at', '>', Carbon::parse($syncToken));
+        }
+
+        return $query->get();
     }
 
     private function bookEntitlement(Book $book): array
