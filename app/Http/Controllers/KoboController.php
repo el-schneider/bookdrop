@@ -21,6 +21,10 @@ class KoboController extends Controller
     public function authDevice(Request $request, string $token): JsonResponse
     {
         $this->ensureValidToken($token);
+        $this->logKoboRequest('auth.device', $request, [
+            'user_key_present' => filled($request->input('UserKey')),
+            'device_id_present' => filled($request->header('x-kobo-deviceid')),
+        ]);
 
         return response()->json($this->authPayload($request));
     }
@@ -28,6 +32,10 @@ class KoboController extends Controller
     public function authRefresh(Request $request, string $token): JsonResponse
     {
         $this->ensureValidToken($token);
+        $this->logKoboRequest('auth.refresh', $request, [
+            'user_key_present' => filled($request->input('UserKey')),
+            'device_id_present' => filled($request->header('x-kobo-deviceid')),
+        ]);
 
         return response()->json($this->authPayload($request));
     }
@@ -35,6 +43,7 @@ class KoboController extends Controller
     public function initialization(Request $request, string $token): JsonResponse
     {
         $this->ensureValidToken($token);
+        $this->logKoboRequest('initialization', $request);
 
         $base = $this->settings->publicBaseUrl($request).'/kobo/'.$token;
 
@@ -59,7 +68,8 @@ class KoboController extends Controller
         $this->ensureValidToken($token);
 
         $disk = Storage::disk((string) config('bookdrop.storage_disk'));
-        $books = $this->booksForSync($request)
+        $syncToken = $this->syncToken($request);
+        $books = $this->booksForSync($syncToken)
             ->filter(fn (Book $book): bool => $disk->exists($book->stored_path))
             ->map(fn (Book $book): array => [
                 'NewEntitlement' => [
@@ -68,6 +78,12 @@ class KoboController extends Controller
                 ],
             ])
             ->values();
+
+        $this->logKoboRequest('library.sync', $request, [
+            'sync_token_present' => $syncToken !== null,
+            'sync_mode' => $syncToken === null ? 'full' : 'delta',
+            'book_count' => $books->count(),
+        ]);
 
         return response()->json($books)
             ->header('x-kobo-sync', 'complete')
@@ -186,12 +202,16 @@ class KoboController extends Controller
 
     private function authPayload(Request $request): array
     {
+        $authToken = hash_hmac('sha256', 'kobo-auth', $this->settings->koboToken());
+
         return [
-            'AccessToken' => $this->settings->koboToken(),
-            'RefreshToken' => $this->settings->koboToken(),
+            'AccessToken' => $authToken,
+            'RefreshToken' => $authToken,
             'TokenType' => 'Bearer',
-            'TrackingId' => (string) Str::uuid(),
+            'TrackingId' => hash_hmac('sha256', 'kobo-tracking', $this->settings->koboToken()),
             'UserKey' => $request->input('UserKey', 'bookdrop'),
+            'ExpiresIn' => 315_360_000,
+            'AccessTokenExpiry' => now()->addYears(10)->toIso8601String(),
         ];
     }
 
@@ -217,16 +237,42 @@ class KoboController extends Controller
             ->header('Cache-Control', 'public, max-age=300');
     }
 
-    private function booksForSync(Request $request): Collection
+    private function booksForSync(?Carbon $syncToken): Collection
     {
         $query = Book::query()->orderBy('uploaded_at');
-        $syncToken = $request->header('x-kobo-synctoken');
 
-        if (filled($syncToken)) {
-            $query->where('uploaded_at', '>', Carbon::parse($syncToken));
+        if ($syncToken !== null) {
+            $query->where('uploaded_at', '>', $syncToken);
         }
 
         return $query->get();
+    }
+
+    private function syncToken(Request $request): ?Carbon
+    {
+        $syncToken = $request->header('x-kobo-synctoken');
+
+        if (blank($syncToken)) {
+            return null;
+        }
+
+        try {
+            return Carbon::parse($syncToken);
+        } catch (\Throwable $exception) {
+            $this->logKoboRequest('library.sync.invalid_token', $request, [
+                'error' => $exception::class,
+            ]);
+
+            return null;
+        }
+    }
+
+    private function logKoboRequest(string $event, Request $request, array $context = []): void
+    {
+        logger()->warning('Kobo '.$event, $context + [
+            'method' => $request->method(),
+            'user_agent' => Str::limit((string) $request->userAgent(), 120, ''),
+        ]);
     }
 
     private function bookEntitlement(Book $book): array
