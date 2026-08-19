@@ -93,7 +93,7 @@ class KepubConverter
 
             return null;
         } finally {
-            $this->removeDirectory($scratch);
+            $this->removeScratch($scratch);
         }
     }
 
@@ -110,16 +110,27 @@ class KepubConverter
         return $found !== '' && is_executable($found) ? $found : null;
     }
 
-    private function removeDirectory(string $directory): void
+    /**
+     * Handles the scratch path being a plain file as well as a directory: given a path that does
+     * not exist, kepubify writes a file there instead, and those would otherwise pile up at the
+     * full size of every book.
+     */
+    private function removeScratch(string $path): void
     {
-        if (! is_dir($directory)) {
+        if (is_file($path)) {
+            @unlink($path);
+
             return;
         }
 
-        foreach (glob($directory.'/*') ?: [] as $file) {
+        if (! is_dir($path)) {
+            return;
+        }
+
+        foreach (glob($path.'/*') ?: [] as $file) {
             @unlink($file);
         }
 
-        @rmdir($directory);
+        @rmdir($path);
     }
 }
