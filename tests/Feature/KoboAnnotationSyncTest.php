@@ -31,11 +31,14 @@ class KoboAnnotationSyncTest extends TestCase
         ]);
     }
 
-    public function test_the_device_is_pointed_at_bookdrop_for_annotations(): void
+    public function test_reading_services_host_is_not_advertised_from_here(): void
     {
+        // Advertising a tokenised path for reading services sent the device's annotation calls to
+        // the site root, where they 404'd, and a highlight was destroyed. The device reaches the
+        // root routes instead; these tokenised endpoints exist only to keep this logic tested.
         $this->getJson($this->url('v1/initialization'))
             ->assertOk()
-            ->assertJsonPath('Resources.reading_services_host', 'https://bookdrop.test/kobo/'.self::TOKEN);
+            ->assertJsonMissingPath('Resources.reading_services_host');
     }
 
     public function test_an_empty_store_answers_without_an_etag_so_the_device_uploads(): void

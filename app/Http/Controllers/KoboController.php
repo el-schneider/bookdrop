@@ -65,10 +65,10 @@ class KoboController extends Controller
                 'reading_state' => $base.'/v1/library/{Ids}/state',
                 'delete_entitlement' => $base.'/v1/library/{Ids}',
                 'post_analytics_event' => $base.'/v1/analytics/event',
-                // Points annotation sync at Bookdrop instead of Kobo's servers. Without this the
-                // device keeps sending highlights to readingservices.kobo.com, where a sideloaded
-                // book has no entitlement.
-                'reading_services_host' => $base,
+                // reading_services_host is deliberately NOT advertised. It is an ORIGIN, not a
+                // base URL: firmware 4.45.23697 discarded the tokenised path, sent annotation
+                // calls to the site root, received 404s, and destroyed a highlight on the device.
+                // Do not re-add until the root endpoints are proven by an observed sync.
                 'image_host' => $this->settings->publicBaseUrl($request),
                 'image_url_template' => $base.'/{ImageId}/{width}/{height}/false/image.jpg',
                 'image_url_quality_template' => $base.'/{ImageId}/{width}/{height}/{Quality}/false/image.jpg',
