@@ -14,6 +14,12 @@ if [ -z "${APP_KEY:-}" ]; then
     exit 1
 fi
 
+# Migrations run unattended on every boot. Snapshot first so a bad one is recoverable.
+# ponytail: snapshots are never pruned; add retention if /data ever fills.
+if [ -s /data/database.sqlite ]; then
+    cp /data/database.sqlite "/data/database.sqlite.bak-$(date +%Y%m%d%H%M%S)"
+fi
+
 php artisan config:clear --no-interaction
 php artisan migrate --force --no-interaction
 php artisan view:cache --no-interaction
