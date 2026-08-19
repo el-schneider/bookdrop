@@ -47,6 +47,9 @@
                                         @else
                                             —
                                         @endif
+                                        @if ($book->annotations_count > 0)
+                                            · <a href="{{ route('library.books.annotations', $book) }}">{{ $book->annotations_count }}</a>
+                                        @endif
                                     </td>
                                     <td>
                                         @if (\Illuminate\Support\Facades\Storage::disk($disk)->exists($book->stored_path))
@@ -115,6 +118,14 @@
                                             @endif
                                         @else
                                             —
+                                        @endif
+
+                                        @if ($book->annotations_count > 0)
+                                            <div class="bd-subhead">
+                                                <a href="{{ route('library.books.annotations', $book) }}" class="bd-page-link inline-block">
+                                                    {{ $book->annotations_count }} {{ \Illuminate\Support\Str::plural('note', $book->annotations_count) }}
+                                                </a>
+                                            </div>
                                         @endif
                                     </td>
                                     <td>

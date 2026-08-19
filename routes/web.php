@@ -21,6 +21,10 @@ Route::get('library/books/{book}/cover', LibraryCoverController::class)
     ->middleware(['auth', 'verified'])
     ->name('library.books.cover');
 
+Route::get('library/books/{book}/annotations', function (string $book) {
+    return view('book-annotations', ['book' => $book]);
+})->middleware(['auth', 'verified'])->name('library.books.annotations');
+
 Route::view('profile', 'profile')
     ->middleware(['auth'])
     ->name('profile');

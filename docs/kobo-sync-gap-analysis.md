@@ -188,19 +188,50 @@ sync response. Bidirectional: collections created on the device appear in Bookdr
 
 Note this contradicts the current PRD ("no shelves"). Decide explicitly before building.
 
-### Stage 5 — annotations (highlights, notes, dogears)
+### Stage 5 — annotations (highlights, notes, dogears) — SHIPPED
 
 **Hard dependency on Stage 3.** Until books carry KEPUB span markup the device will not create an
 annotation at all, so there is nothing for this stage to sync. Confirmed by measurement (§3).
 
-- Override `reading_services_host` in the initialization map to Bookdrop's own tokenized base.
-- Implement `checkforchanges` / `GET annotations` / `PATCH annotations` under
-  `/api/v3/content/{contentId}/...`, with `contentId` = the book UUID.
-- Store annotations verbatim as JSON plus a per-book ETag. Payload shape:
-  `{id, type: highlight|note|dogear, highlightedText, noteText, clientLastModifiedUtc,
-  location: {span: {chapterFilename, chapterProgress, …}}}`.
-- Respect the empty-body/no-ETag handshake described in §3.
-- Render highlights on the book page.
+Four things were learned the hard way; each cost a destroyed highlight.
+
+1. **`reading_services_host` is an ORIGIN, not a base URL.** Kobo's native value is
+   `https://readingservices.kobo.com`, with no path. Firmware 4.45.23697 discards any path, so a
+   tokenised value cannot work: annotation calls arrive at the site root. The endpoints therefore
+   live at `/api/v3/content/...`, outside the tokenised prefix.
+2. **Leaving the key unset is not neutral.** Kobo's own servers hold no entitlement for a
+   self-hosted book, answer authoritatively that it has no annotations, and the device deletes its
+   local copy. Taking over the host is mandatory for highlights to survive a sync at all.
+3. **Storing is not optional.** Once the device has uploaded successfully it treats the server as
+   the source of truth. A server that acknowledges an upload and keeps nothing causes the device to
+   delete the annotations on the next read. An "inert" mode is safe only while uploads are broken.
+4. **CSRF exemption is required.** Devices send no CSRF token, and the exemption list covered only
+   `kobo/*`, so every `POST`/`PATCH` was rejected with 419. This is invisible to the test suite:
+   `PreventRequestForgery` short-circuits on `runningUnitTests()`, so the exemption list is
+   asserted directly instead.
+
+Protocol, verified against a real device:
+
+- `POST /api/v3/content/checkforchanges` — body is a JSON array of `{ContentId, etag}`; respond
+  with a flat array of changed `ContentId`s. `W/"0"` means the device holds none.
+- `GET /api/v3/content/{contentId}/annotations` — `{annotations: [...], nextPageOffsetToken: null}`.
+  Send an ETag **only** when annotations are stored; an ETag alongside an empty list tells the
+  device its copy is superseded and it deletes. Honour `If-None-Match` with 304.
+- `PATCH` — `{updatedAnnotations: [...]}`, stored verbatim, keyed by the device's own annotation id.
+- Payload shape: `{id, type: highlight|note|dogear, highlightedText, noteText,
+  clientLastModifiedUtc, highlightColor, location: {span: {chapterFilename, chapterProgress,
+  startPath, ...}}}`.
+- These three routes must **never** 404, including for unknown content ids: a 404 was present in
+  every observed data-loss incident. Unrecognised callers get the empty-store shape instead.
+
+Authentication: the sync token cannot travel in the path at the root. Bookdrop accepts the token it
+issues from `/v1/auth/device`, and otherwise pins the device's own `Authorization` header the first
+time it appears on a request naming a real book (ids are unguessable). After that the pin is
+required. In practice the device presents its own credential, so the pin is what secures this.
+
+UI: annotation counts link from the library to a per-book page. Ordering groups by chapter file
+then position, which approximates reading order — true order lives in the EPUB spine, which is not
+stored, so a preface sorts after `ch01`.
 
 ### Stage 6 — optional reach
 

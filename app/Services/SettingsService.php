@@ -53,6 +53,31 @@ class SettingsService
         return rtrim((string) config('app.url'), '/');
     }
 
+    /**
+     * The Authorization header value the device presents to reading services, learned on first
+     * use. Null until a device has been seen.
+     */
+    public function readingServicesAuth(): ?string
+    {
+        $value = $this->settings()->reading_services_auth;
+
+        return filled($value) ? (string) $value : null;
+    }
+
+    /**
+     * Pins the device's Authorization header. Only ever called for a request that already proved
+     * itself another way, and never overwrites an existing pin.
+     */
+    public function pinReadingServicesAuth(string $authorization): void
+    {
+        $settings = $this->settings();
+
+        if (blank($settings->reading_services_auth) && filled($authorization)) {
+            $settings->reading_services_auth = $authorization;
+            $settings->save();
+        }
+    }
+
     public function koboEndpoint(?Request $request = null): string
     {
         return $this->publicBaseUrl($request).'/kobo/'.$this->koboToken();

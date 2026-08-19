@@ -5,6 +5,7 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Database\Eloquent\SoftDeletes;
 
@@ -48,6 +49,12 @@ class Book extends Model
     public function readingState(): HasOne
     {
         return $this->hasOne(ReadingState::class);
+    }
+
+    /** @return HasMany<Annotation, $this> */
+    public function annotations(): HasMany
+    {
+        return $this->hasMany(Annotation::class);
     }
 
     /**

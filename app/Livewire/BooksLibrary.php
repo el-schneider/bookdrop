@@ -50,6 +50,7 @@ class BooksLibrary extends Component
     {
         return Book::query()
             ->with('readingState')
+            ->withCount('annotations')
             ->orderByDesc('uploaded_at')
             ->paginate($this->view === 'compact' ? 25 : 10);
     }

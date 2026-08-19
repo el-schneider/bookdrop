@@ -5,6 +5,7 @@ namespace Tests\Feature;
 use App\Models\Annotation;
 use App\Models\Book;
 use App\Models\Setting;
+use App\Services\SettingsService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
@@ -169,6 +170,40 @@ class KoboAnnotationSyncTest extends TestCase
 
         $response->assertOk()->assertJsonPath('annotations', []);
         $this->assertNull($response->headers->get('etag'));
+    }
+
+    public function test_the_devices_own_credential_is_pinned_on_first_use(): void
+    {
+        $book = $this->book();
+        $deviceHeader = ['Authorization' => 'Bearer device-issued-token'];
+
+        // Nothing pinned yet: the request is trusted because it names a real book, and the
+        // credential is remembered.
+        $this->withHeaders($deviceHeader)->patchJson('/api/v3/content/'.$book->id.'/annotations', [
+            'updatedAnnotations' => [$this->annotation('anno-1')],
+        ])->assertOk();
+
+        $this->assertSame('Bearer device-issued-token', app(SettingsService::class)->readingServicesAuth());
+        $this->assertSame(1, Annotation::query()->count());
+    }
+
+    public function test_a_different_credential_is_refused_once_one_is_pinned(): void
+    {
+        $book = $this->book();
+        $path = '/api/v3/content/'.$book->id.'/annotations';
+
+        $this->withHeaders(['Authorization' => 'Bearer device-issued-token'])
+            ->patchJson($path, ['updatedAnnotations' => [$this->annotation('anno-1')]])->assertOk();
+
+        // A different credential must not write, even though it names a real book.
+        $this->withHeaders(['Authorization' => 'Bearer someone-else'])
+            ->patchJson($path, ['updatedAnnotations' => [$this->annotation('anno-2')]])->assertOk();
+
+        $this->assertSame(1, Annotation::query()->count(), 'a mismatched credential must not store');
+
+        // ...and must not read them back either.
+        $this->withHeaders(['Authorization' => 'Bearer someone-else'])
+            ->getJson($path)->assertOk()->assertJsonPath('annotations', []);
     }
 
     public function test_an_unauthorised_upload_is_acknowledged_but_not_stored(): void

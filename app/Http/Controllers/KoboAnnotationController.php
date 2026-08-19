@@ -181,21 +181,49 @@ class KoboAnnotationController extends Controller
      * unguessable. Both outcomes are logged so the real auth posture can be tightened once the
      * device's behaviour is known.
      */
+    /**
+     * Reading services sit at the site root, so the sync token cannot travel in the path.
+     *
+     * Two credentials are accepted: the token Bookdrop issues from /v1/auth/device, and the
+     * device's own Authorization header, which is pinned the first time it appears on a request
+     * that already names a real book. In practice the device presents its own, so the pin is what
+     * secures this after the first sync. Book ids are unguessable, which is what makes the
+     * bootstrap safe.
+     */
     private function authorized(Request $request, ?string $contentId): bool
     {
-        $expected = 'Bearer '.hash_hmac('sha256', 'kobo-auth', $this->settings->koboToken());
         $presented = (string) $request->header('authorization', '');
 
-        if (hash_equals($expected, $presented)) {
-            return true;
+        if ($presented !== '') {
+            $issued = 'Bearer '.hash_hmac('sha256', 'kobo-auth', $this->settings->koboToken());
+
+            if (hash_equals($issued, $presented)) {
+                return true;
+            }
+
+            $pinned = $this->settings->readingServicesAuth();
+
+            if ($pinned !== null) {
+                // Once pinned, a mismatch is refused outright: this is the steady state.
+                if (hash_equals($pinned, $presented)) {
+                    return true;
+                }
+
+                logger()->warning('Kobo reading services credential mismatch', ['content_id' => $contentId]);
+
+                return false;
+            }
         }
 
-        // Falling back to "names a real book" keeps a device whose Authorization header differs
-        // from ours working, without letting an anonymous caller write arbitrary rows. Book UUIDs
-        // are unguessable. Every fallback is logged so the posture can be tightened once the
-        // device's actual header is confirmed.
         $knownBook = $contentId !== null
             && Book::query()->withTrashed()->whereKey($contentId)->exists();
+
+        if ($knownBook && $presented !== '') {
+            $this->settings->pinReadingServicesAuth($presented);
+            logger()->warning('Kobo reading services credential pinned', ['content_id' => $contentId]);
+
+            return true;
+        }
 
         logger()->warning('Kobo reading services unverified request', [
             'content_id' => $contentId,
