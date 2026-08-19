@@ -31,6 +31,7 @@
                             <tr>
                                 <th>Title</th>
                                 <th>Author</th>
+                                <th>Reading</th>
                                 <th>Sync</th>
                                 <th class="text-right">Actions</th>
                             </tr>
@@ -40,11 +41,18 @@
                                 <tr>
                                     <td class="font-medium">{{ $book->title }}</td>
                                     <td class="bd-muted">{{ $book->author ?: '—' }}</td>
+                                    <td class="bd-muted">
+                                        @if ($book->readingState)
+                                            {{ $book->readingState->statusLabel() }} · {{ $book->readingState->percent() }}%
+                                        @else
+                                            —
+                                        @endif
+                                    </td>
                                     <td>
                                         @if (\Illuminate\Support\Facades\Storage::disk($disk)->exists($book->stored_path))
                                             <span class="bd-icon-status" title="Active" aria-label="Active"><span class="material-symbols-outlined" aria-hidden="true">check</span></span>
                                         @else
-                                            <span class="bd-status">Missing file</span>
+                                            <span class="bd-icon-status bd-icon-status-alert" title="Missing file" aria-label="Missing file"><span class="material-symbols-outlined" aria-hidden="true">error</span></span>
                                         @endif
                                     </td>
                                     <td class="text-right">
@@ -62,7 +70,7 @@
                                 </tr>
                             @empty
                                 <tr>
-                                    <td colspan="4" class="py-10 text-center bd-subhead">No books uploaded yet.</td>
+                                    <td colspan="5" class="py-10 text-center bd-subhead">No books uploaded yet.</td>
                                 </tr>
                             @endforelse
                         </tbody>
@@ -76,6 +84,7 @@
                                 <th>Author</th>
                                 <th>Filename</th>
                                 <th>Uploaded</th>
+                                <th>Reading</th>
                                 <th>Sync</th>
                                 <th class="text-right">Actions</th>
                             </tr>
@@ -97,12 +106,22 @@
                                     <td class="font-medium">{{ $book->title }}</td>
                                     <td class="bd-muted">{{ $book->author ?: '—' }}</td>
                                     <td class="bd-muted">{{ $book->original_filename }}</td>
-                                    <td class="bd-muted">{{ $book->uploaded_at?->toDayDateTimeString() }}</td>
+                                    <td class="bd-muted">{{ $book->uploaded_at?->isoFormat('L LT') }}</td>
+                                    <td class="bd-muted">
+                                        @if ($book->readingState)
+                                            <div>{{ $book->readingState->statusLabel() }} · {{ $book->readingState->percent() }}%</div>
+                                            @if ($book->readingState->timeSpentLabel())
+                                                <div class="bd-subhead">{{ $book->readingState->timeSpentLabel() }} read</div>
+                                            @endif
+                                        @else
+                                            —
+                                        @endif
+                                    </td>
                                     <td>
                                         @if (\Illuminate\Support\Facades\Storage::disk($disk)->exists($book->stored_path))
                                             <span class="bd-icon-status" title="Active" aria-label="Active"><span class="material-symbols-outlined" aria-hidden="true">check</span></span>
                                         @else
-                                            <span class="bd-status">Missing file</span>
+                                            <span class="bd-icon-status bd-icon-status-alert" title="Missing file" aria-label="Missing file"><span class="material-symbols-outlined" aria-hidden="true">error</span></span>
                                         @endif
                                     </td>
                                     <td class="text-right">
@@ -120,7 +139,7 @@
                                 </tr>
                             @empty
                                 <tr>
-                                    <td colspan="7" class="py-10 text-center bd-subhead">No books uploaded yet.</td>
+                                    <td colspan="8" class="py-10 text-center bd-subhead">No books uploaded yet.</td>
                                 </tr>
                             @endforelse
                         </tbody>

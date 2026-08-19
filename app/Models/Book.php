@@ -5,6 +5,7 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Database\Eloquent\SoftDeletes;
 
 #[Fillable([
@@ -40,6 +41,12 @@ class Book extends Model
     public function nextRevision(): int
     {
         return (int) static::withTrashed()->max('revision') + 1;
+    }
+
+    /** @return HasOne<ReadingState, $this> */
+    public function readingState(): HasOne
+    {
+        return $this->hasOne(ReadingState::class);
     }
 
     /**

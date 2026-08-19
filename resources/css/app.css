@@ -305,39 +305,36 @@
         padding-block: 0.65rem;
     }
 
-    .bd-status {
-        border-left: 1px solid var(--ink);
-        padding-left: 0.65rem;
-        color: var(--muted);
-        font-size: 11px;
-        text-transform: uppercase;
-        letter-spacing: 0.08em;
-        white-space: nowrap;
-    }
-
-    .bd-icon-status {
-        display: inline-flex;
-        align-items: center;
-        justify-content: center;
-        width: 1.6rem;
-        height: 1.6rem;
-        border: 1px solid var(--rule);
-        color: var(--ink);
-    }
-
+    /* Shared geometry so status glyphs and action buttons line up across columns. */
+    .bd-icon-status,
     .bd-icon-button {
         display: inline-flex;
         align-items: center;
         justify-content: center;
         width: 1.9rem;
         height: 1.9rem;
-        border: 1px solid var(--rule);
-        background: transparent;
+    }
+
+    /* Status is not interactive: no frame, no hover, muted ink. Framing it like the button is
+       what made the two read as the same control. */
+    .bd-icon-status {
+        border: 0;
+        color: var(--muted);
+    }
+
+    .bd-icon-status-alert {
         color: var(--ink);
     }
 
+    .bd-icon-button {
+        border: 1px solid var(--rule);
+        background: transparent;
+        color: var(--ink);
+        cursor: pointer;
+    }
+
     .bd-icon-button:hover,
-    .bd-icon-button:focus {
+    .bd-icon-button:focus-visible {
         border-color: var(--ink);
         outline: none;
     }

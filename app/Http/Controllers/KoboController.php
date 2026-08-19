@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Models\Book;
+use App\Models\ReadingState;
 use App\Services\EpubMetadataExtractor;
 use App\Services\SettingsService;
 use Illuminate\Database\Eloquent\Collection;
@@ -104,17 +105,27 @@ class KoboController extends Controller
                 : ['ChangedEntitlement' => $entitlement];
         })->values();
 
+        // Reading states travel as standalone records, never inline on an entitlement, so the
+        // same state can never be announced twice in one response. They share the page budget
+        // with entitlements: the device's ~30s sync timeout applies to the whole response, not
+        // to each record type.
+        $states = $this->changedReadingStates($syncToken, max(0, $limit - $page->count()));
+        $hasMore = $hasMore || $states['has_more'];
+
         $this->logKoboRequest('library.sync', $request, [
             'sync_token_present' => $syncToken !== null,
             'sync_mode' => $syncToken === null ? 'full' : 'delta',
             'book_count' => $entitlements->count(),
             'removed_count' => $page->filter(fn (Book $book): bool => $book->trashed())->count(),
+            'reading_state_count' => count($states['records']),
             'has_more' => $hasMore,
         ]);
 
+        $entitlements = $entitlements->concat($states['records']);
+
         return response()->json($entitlements)
             ->header('x-kobo-sync', $hasMore ? 'continue' : 'complete')
-            ->header('x-kobo-synctoken', $this->nextSyncToken($request, $syncToken, $page, $hasMore));
+            ->header('x-kobo-synctoken', $this->nextSyncToken($request, $syncToken, $page, $hasMore, $states['revision']));
     }
 
     public function metadata(Request $request, string $token, string $bookId): JsonResponse
@@ -132,43 +143,203 @@ class KoboController extends Controller
     public function getState(string $token, string $bookId): JsonResponse
     {
         $this->ensureValidToken($token);
-        $book = Book::query()->whereKey($bookId)->first();
+        $book = Book::query()->with('readingState')->whereKey($bookId)->first();
+        $state = $book?->readingState;
+
+        // Nothing invented here: answering with a synthetic ReadyToRead would hand the device an
+        // empty progress record for a book whose real position only the device knows.
+        if ($state === null) {
+            return response()->json([]);
+        }
 
         // Kobo expects a bare array of reading states, not an object wrapping one.
-        return response()->json([[
-            'EntitlementId' => $book?->id ?? $bookId,
-            'Created' => $this->koboTimestamp($book?->uploaded_at),
-            'LastModified' => $this->koboTimestamp(null),
-            'PriorityTimestamp' => $this->koboTimestamp(null),
-            'StatusInfo' => [
-                'LastModified' => $this->koboTimestamp(null),
-                'Status' => 'ReadyToRead',
-                'TimesStartedReading' => 0,
-            ],
-            'Statistics' => [
-                'LastModified' => $this->koboTimestamp(null),
-            ],
-            'CurrentBookmark' => [
-                'LastModified' => $this->koboTimestamp(null),
-            ],
-        ]]);
+        return response()->json([
+            $this->readingStateResponse($book->id, $book->uploaded_at, $state),
+        ]);
     }
 
-    public function putState(string $token, string $bookId): JsonResponse
+    public function putState(Request $request, string $token, string $bookId): JsonResponse
     {
         $this->ensureValidToken($token);
+        $book = Book::query()->whereKey($bookId)->first();
+
+        if (! $book) {
+            // The device holds the only copy of this progress. Acknowledging success while
+            // discarding it would lose it silently, so fail visibly instead.
+            $this->logKoboRequest('library.state.unknown_book', $request, ['book_id' => $bookId]);
+
+            return response()->json([
+                'RequestResult' => 'Failure',
+                'UpdateResults' => [[
+                    'EntitlementId' => $bookId,
+                    'Result' => 'Failure',
+                ]],
+            ], 404);
+        }
+
+        $reported = (array) $request->input('ReadingStates.0', []);
+        $state = $book->readingState ?? new ReadingState(['book_id' => $book->id]);
+        $results = ['EntitlementId' => $book->id];
+
+        // Every section is optional, and so is every field inside it: firmware 4.45.x sends
+        // StatusInfo without TimesStartedReading. Only keys actually present are written, or a
+        // partial report would wipe values the device still relies on.
+        if (is_array($bookmark = $reported['CurrentBookmark'] ?? null)) {
+            if (array_key_exists('ProgressPercent', $bookmark)) {
+                $state->progress_percent = $this->nullableFloat($bookmark['ProgressPercent']);
+            }
+
+            if (array_key_exists('ContentSourceProgressPercent', $bookmark)) {
+                $state->content_source_progress_percent = $this->nullableFloat($bookmark['ContentSourceProgressPercent']);
+            }
+
+            if (is_array($location = $bookmark['Location'] ?? null)) {
+                $state->location_value = $location['Value'] ?? null;
+                $state->location_type = $location['Type'] ?? null;
+                $state->location_source = $location['Source'] ?? null;
+            }
+
+            $results['CurrentBookmarkResult'] = ['Result' => 'Success'];
+        }
+
+        if (is_array($statistics = $reported['Statistics'] ?? null)) {
+            if (array_key_exists('SpentReadingMinutes', $statistics)) {
+                $state->spent_reading_minutes = $this->nullableInt($statistics['SpentReadingMinutes']);
+            }
+
+            if (array_key_exists('RemainingTimeMinutes', $statistics)) {
+                $state->remaining_time_minutes = $this->nullableInt($statistics['RemainingTimeMinutes']);
+            }
+
+            $results['StatisticsResult'] = ['Result' => 'Success'];
+        }
+
+        if (is_array($statusInfo = $reported['StatusInfo'] ?? null)) {
+            $status = $this->readStatus($statusInfo['Status'] ?? null);
+
+            // An unrecognised or absent Status leaves the stored one alone; defaulting it to
+            // unread would invent a regression and sync it back to the device.
+            if ($status !== null) {
+                if ($status === ReadingState::STATUS_READING && $state->status !== ReadingState::STATUS_READING) {
+                    $state->times_started_reading = (int) $state->times_started_reading + 1;
+                    $state->last_time_started_reading = now();
+                }
+
+                $state->status = $status;
+            }
+
+            // Devices that report their own counters are authoritative; the inference above only
+            // covers firmware that omits them.
+            if (array_key_exists('TimesStartedReading', $statusInfo) && is_numeric($statusInfo['TimesStartedReading'])) {
+                $state->times_started_reading = (int) $statusInfo['TimesStartedReading'];
+            }
+
+            if (filled($statusInfo['LastTimeStartedReading'] ?? null)) {
+                $state->last_time_started_reading = Carbon::parse($statusInfo['LastTimeStartedReading']);
+            }
+
+            $results['StatusInfoResult'] = ['Result' => 'Success'];
+        }
+
+        $state->last_modified = now();
+        $state->save();
+
+        $this->logKoboRequest('library.state.update', $request, [
+            'status' => $state->status,
+            'progress_percent' => $state->progress_percent,
+        ]);
 
         return response()->json([
             'RequestResult' => 'Success',
-            'UpdateResults' => [[
-                'EntitlementId' => $bookId,
-                'CurrentBookmarkResult' => ['Result' => 'Success'],
-                'StatisticsResult' => ['Result' => 'Success'],
-                'StatusInfoResult' => ['Result' => 'Success'],
-                'LastModified' => now()->toIso8601String(),
-                'PriorityTimestamp' => now()->toIso8601String(),
+            'UpdateResults' => [$results + [
+                'LastModified' => $this->koboTimestamp($state->last_modified),
+                'PriorityTimestamp' => $this->koboTimestamp($state->priority_timestamp),
             ]],
         ]);
+    }
+
+    /**
+     * Null means "not reported", which is different from "reported as unread".
+     */
+    private function readStatus(mixed $status): ?string
+    {
+        return match ($status) {
+            ReadingState::STATUS_READING => ReadingState::STATUS_READING,
+            ReadingState::STATUS_FINISHED => ReadingState::STATUS_FINISHED,
+            ReadingState::STATUS_UNREAD => ReadingState::STATUS_UNREAD,
+            default => null,
+        };
+    }
+
+    private function nullableFloat(mixed $value): ?float
+    {
+        return is_numeric($value) ? (float) $value : null;
+    }
+
+    private function nullableInt(mixed $value): ?int
+    {
+        return is_numeric($value) ? (int) $value : null;
+    }
+
+    /**
+     * Whole numbers are emitted as integers: Kobo expects that shape for percentages.
+     */
+    private function readingStateResponse(string $bookId, ?Carbon $created, ?ReadingState $state): array
+    {
+        $lastModified = $this->koboTimestamp($state?->last_modified);
+
+        $bookmark = ['LastModified' => $lastModified];
+
+        if ($state?->progress_percent !== null) {
+            $bookmark['ProgressPercent'] = $this->cleanProgress($state->progress_percent);
+        }
+
+        if ($state?->content_source_progress_percent !== null) {
+            $bookmark['ContentSourceProgressPercent'] = $this->cleanProgress($state->content_source_progress_percent);
+        }
+
+        if (filled($state?->location_value)) {
+            $bookmark['Location'] = [
+                'Value' => $state->location_value,
+                'Type' => $state->location_type,
+                'Source' => $state->location_source,
+            ];
+        }
+
+        $statistics = ['LastModified' => $lastModified];
+
+        if ($state?->spent_reading_minutes !== null) {
+            $statistics['SpentReadingMinutes'] = $state->spent_reading_minutes;
+        }
+
+        if ($state?->remaining_time_minutes !== null) {
+            $statistics['RemainingTimeMinutes'] = $state->remaining_time_minutes;
+        }
+
+        $statusInfo = [
+            'LastModified' => $lastModified,
+            'Status' => $state?->status ?? ReadingState::STATUS_UNREAD,
+            'TimesStartedReading' => (int) ($state?->times_started_reading ?? 0),
+        ];
+
+        if ($state?->last_time_started_reading !== null) {
+            $statusInfo['LastTimeStartedReading'] = $this->koboTimestamp($state->last_time_started_reading);
+        }
+
+        return [
+            'EntitlementId' => $bookId,
+            'Created' => $this->koboTimestamp($created),
+            'LastModified' => $lastModified,
+            'PriorityTimestamp' => $this->koboTimestamp($state?->priority_timestamp),
+            'StatusInfo' => $statusInfo,
+            'Statistics' => $statistics,
+            'CurrentBookmark' => $bookmark,
+        ];
+    }
+
+    private function cleanProgress(float $value): int|float
+    {
+        return $value == (int) $value ? (int) $value : $value;
     }
 
     public function deleteEntitlement(string $token, string $bookId): Response
@@ -302,7 +473,56 @@ class KoboController extends Controller
     }
 
     /**
-     * @param  array{revision: int, created: Carbon}|null  $cursor
+     * Reading states only exist once a device has reported one, so nothing here can invent a
+     * state and push it down over progress the server has never been told about.
+     *
+     * @param  array{revision: int, created: Carbon, state: int}|null  $cursor
+     * @return array{records: array<int, array<string, mixed>>, revision: int, has_more: bool}
+     */
+    private function changedReadingStates(?array $cursor, int $limit): array
+    {
+        $since = $cursor['state'] ?? 0;
+
+        if ($limit < 1) {
+            // No budget left in this page. The cursor stays put so nothing is skipped, and the
+            // device is only asked to continue if states are genuinely still pending: claiming
+            // "more" on an exhausted-but-empty queue pins the cursor and spins the device.
+            return [
+                'records' => [],
+                'revision' => $since,
+                'has_more' => ReadingState::query()->where('revision', '>', $since)->exists(),
+            ];
+        }
+
+        $states = ReadingState::query()
+            ->with('book')
+            ->where('revision', '>', $since)
+            ->orderBy('revision')
+            ->get()
+            ->filter(fn (ReadingState $state): bool => $state->book !== null);
+
+        $hasMore = $states->count() > $limit;
+        $page = $states->take($limit)->values();
+
+        $records = $page->map(fn (ReadingState $state): array => [
+            'ChangedReadingState' => [
+                'ReadingState' => $this->readingStateResponse(
+                    $state->book->id,
+                    $state->book->uploaded_at,
+                    $state,
+                ),
+            ],
+        ])->all();
+
+        return [
+            'records' => $records,
+            'revision' => $page->isEmpty() ? $since : (int) $page->last()->revision,
+            'has_more' => $hasMore,
+        ];
+    }
+
+    /**
+     * @param  array{revision: int, created: Carbon, state: int}|null  $cursor
      */
     private function isNewToDevice(Book $book, ?array $cursor): bool
     {
@@ -321,17 +541,20 @@ class KoboController extends Controller
      * The device replays this token on its next request. It must identify the last book actually
      * delivered, never "now".
      *
-     * @param  array{revision: int, created: Carbon}|null  $cursor
+     * @param  array{revision: int, created: Carbon, state: int}|null  $cursor
      * @param  \Illuminate\Support\Collection<int, Book>  $page
      */
-    private function nextSyncToken(Request $request, ?array $cursor, $page, bool $hasMore): string
+    private function nextSyncToken(Request $request, ?array $cursor, $page, bool $hasMore, int $stateRevision): string
     {
         if ($page->isEmpty()) {
-            // Nothing was delivered, so the device's position is unchanged. Echoing its own token
-            // back avoids advancing past books it has never seen.
-            $current = (string) $request->header('x-kobo-synctoken', '');
-
-            return $current !== '' ? $current : $this->encodeSyncToken(0, $this->epoch(), $this->epoch());
+            // No book changed, but a reading state may still have moved, so the state cursor has
+            // to advance even when the book cursor stands still.
+            return $this->encodeSyncToken(
+                $cursor['revision'] ?? 0,
+                $cursor['created'] ?? $this->epoch(),
+                $cursor['pending'] ?? $this->epoch(),
+                $stateRevision,
+            );
         }
 
         $previous = $cursor['created'] ?? $this->epoch();
@@ -350,17 +573,18 @@ class KoboController extends Controller
         // pages of the same run report never-seen books as mere changes. Once the run finishes it
         // takes the accumulated maximum, and can only move forward.
         return $hasMore
-            ? $this->encodeSyncToken((int) $page->last()->revision, $previous, $pending)
-            : $this->encodeSyncToken((int) $page->last()->revision, $previous->max($pending), $this->epoch());
+            ? $this->encodeSyncToken((int) $page->last()->revision, $previous, $pending, $stateRevision)
+            : $this->encodeSyncToken((int) $page->last()->revision, $previous->max($pending), $this->epoch(), $stateRevision);
     }
 
-    private function encodeSyncToken(int $revision, Carbon $created, ?Carbon $pending = null): string
+    private function encodeSyncToken(int $revision, Carbon $created, ?Carbon $pending, int $stateRevision): string
     {
         return base64_encode((string) json_encode([
             'v' => 2,
             'revision' => $revision,
             'created' => $created->utc()->toIso8601String(),
             'pending' => ($pending ?? $this->epoch())->utc()->toIso8601String(),
+            'state' => $stateRevision,
         ]));
     }
 
@@ -435,6 +659,9 @@ class KoboController extends Controller
                     'revision' => (int) ($decoded['revision'] ?? 0),
                     'created' => Carbon::parse($decoded['created'])->utc(),
                     'pending' => Carbon::parse($decoded['pending'] ?? $decoded['created'])->utc(),
+                    // Absent in tokens minted before reading states existed; replaying every
+                    // known state once is harmless.
+                    'state' => (int) ($decoded['state'] ?? 0),
                 ];
             } catch (\Throwable) {
                 // Fall through to the legacy handling below.
@@ -450,7 +677,7 @@ class KoboController extends Controller
         try {
             $at = Carbon::parse($timestamp)->utc();
 
-            return ['revision' => 0, 'created' => $at, 'pending' => $at];
+            return ['revision' => 0, 'created' => $at, 'pending' => $at, 'state' => 0];
         } catch (\Throwable $exception) {
             $this->logKoboRequest('library.sync.invalid_token', $request, [
                 'error' => $exception::class,

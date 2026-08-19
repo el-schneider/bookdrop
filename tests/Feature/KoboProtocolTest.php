@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Models\Book;
+use App\Models\ReadingState;
 use App\Models\Setting;
 use App\Services\EpubMetadataExtractor;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -37,12 +38,17 @@ class KoboProtocolTest extends TestCase
     public function test_reading_state_is_returned_as_an_array(): void
     {
         $book = $this->book('Book', 'books/book.epub', '2026-05-14 06:00:00');
+        ReadingState::query()->create([
+            'book_id' => $book->id,
+            'status' => ReadingState::STATUS_READING,
+            'progress_percent' => 10,
+        ]);
 
         $response = $this->getJson($this->url("v1/library/{$book->id}/state"));
 
         $response->assertOk()
             ->assertJsonPath('0.EntitlementId', $book->id)
-            ->assertJsonPath('0.StatusInfo.Status', 'ReadyToRead');
+            ->assertJsonPath('0.StatusInfo.Status', 'Reading');
 
         $this->assertIsArray($response->json());
         $this->assertArrayHasKey(0, $response->json(), 'Kobo expects a bare array of reading states');

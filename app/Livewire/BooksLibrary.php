@@ -48,6 +48,7 @@ class BooksLibrary extends Component
     private function books(): LengthAwarePaginator
     {
         return Book::query()
+            ->with('readingState')
             ->orderByDesc('uploaded_at')
             ->paginate($this->view === 'compact' ? 25 : 10);
     }
