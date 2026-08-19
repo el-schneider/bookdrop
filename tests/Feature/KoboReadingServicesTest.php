@@ -9,8 +9,8 @@ use Tests\TestCase;
 
 /**
  * Reading services run at the site root because the device resolves `reading_services_host` as an
- * origin and discards any path. These routes are in "parking" mode: they must never produce a
- * response that makes the device delete its annotations.
+ * origin and discards any path. These tests cover the wiring and the safety rules; the storage
+ * behaviour itself is covered by KoboAnnotationSyncTest.
  */
 class KoboReadingServicesTest extends TestCase
 {
@@ -41,33 +41,15 @@ class KoboReadingServicesTest extends TestCase
         $this->assertSame('', (string) parse_url($host, PHP_URL_PATH));
     }
 
-    public function test_checkforchanges_reports_nothing_so_no_reconciliation_can_delete(): void
+    public function test_the_annotation_routes_are_exempt_from_csrf(): void
     {
-        $this->postJson('/api/v3/content/checkforchanges', [
-            ['ContentId' => '019e24d5-13f9-7246-9ff6-31ddff35e754', 'etag' => 'W/"abc"'],
-        ])->assertOk()->assertExactJson([]);
-    }
+        // Kobo devices send no CSRF token, so POST/PATCH uploads were rejected with 419 in
+        // production. This cannot be caught by a normal request test: PreventRequestForgery
+        // short-circuits via runningUnitTests(), so the exemption list is asserted directly.
+        $property = new \ReflectionProperty(PreventRequestForgery::class, 'neverVerify');
 
-    public function test_reading_annotations_never_sends_an_etag_while_the_store_is_empty(): void
-    {
-        $response = $this->getJson('/api/v3/content/019e24d5-13f9-7246-9ff6-31ddff35e754/annotations');
-
-        $response->assertOk()
-            ->assertJsonPath('annotations', [])
-            ->assertJsonPath('nextPageOffsetToken', null);
-
-        // An ETag alongside an empty list tells the device its copy is superseded, and it deletes.
-        $this->assertNull($response->headers->get('etag'), 'an empty store must never send an ETag');
-    }
-
-    public function test_uploads_are_acknowledged_without_claiming_storage(): void
-    {
-        $response = $this->patchJson('/api/v3/content/019e24d5-13f9-7246-9ff6-31ddff35e754/annotations', [
-            'updatedAnnotations' => [['id' => 'a1', 'type' => 'highlight']],
-        ]);
-
-        $response->assertOk()->assertJsonPath('result', 'ok');
-        $this->assertNull($response->headers->get('etag'));
+        $this->assertContains('api/v3/*', $property->getValue(), 'reading-services uploads would 419');
+        $this->assertContains('kobo/*', $property->getValue());
     }
 
     public function test_the_three_annotation_routes_never_404(): void
@@ -78,20 +60,6 @@ class KoboReadingServicesTest extends TestCase
         $this->postJson('/api/v3/content/checkforchanges', [])->assertOk();
         $this->getJson("/api/v3/content/{$id}/annotations")->assertOk();
         $this->patchJson("/api/v3/content/{$id}/annotations", ['updatedAnnotations' => []])->assertOk();
-    }
-
-    public function test_the_annotation_routes_are_exempt_from_csrf(): void
-    {
-        // Kobo devices send no CSRF token, so POST/PATCH uploads were rejected with 419 in
-        // production. This cannot be caught by a normal request test: PreventRequestForgery
-        // short-circuits via runningUnitTests(), so the exemption list is asserted directly.
-        $property = new \ReflectionProperty(
-            PreventRequestForgery::class,
-            'neverVerify'
-        );
-
-        $this->assertContains('api/v3/*', $property->getValue(), 'reading-services uploads would 419');
-        $this->assertContains('kobo/*', $property->getValue());
     }
 
     public function test_other_reading_services_paths_are_logged_and_404(): void

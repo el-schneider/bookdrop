@@ -28,9 +28,11 @@ class KoboAnnotationController extends Controller
 {
     public function __construct(private readonly SettingsService $settings) {}
 
-    public function checkForChanges(Request $request, string $token): JsonResponse
+    public function checkForChanges(Request $request): JsonResponse
     {
-        $this->ensureValidToken($token);
+        if (! $this->authorized($request, null)) {
+            return response()->json([]);
+        }
 
         $changed = [];
 
@@ -62,9 +64,13 @@ class KoboAnnotationController extends Controller
         return response()->json($changed);
     }
 
-    public function index(Request $request, string $token, string $contentId): Response
+    public function index(Request $request, string $contentId): Response
     {
-        $this->ensureValidToken($token);
+        // Never 404 here: an unrecognised caller gets the same shape as an empty store, which is
+        // the response that cannot cause the device to delete anything.
+        if (! $this->authorized($request, $contentId)) {
+            return response()->json(['annotations' => [], 'nextPageOffsetToken' => null]);
+        }
 
         $stored = $this->annotationsFor($contentId);
         $body = [
@@ -86,9 +92,11 @@ class KoboAnnotationController extends Controller
         return response()->json($body)->header('etag', $etag);
     }
 
-    public function update(Request $request, string $token, string $contentId): Response
+    public function update(Request $request, string $contentId): Response
     {
-        $this->ensureValidToken($token);
+        if (! $this->authorized($request, $contentId)) {
+            return response()->json(['result' => 'ok']);
+        }
 
         $incoming = (array) $request->input('updatedAnnotations', []);
         $book = Book::query()->withTrashed()->whereKey($contentId)->first();
@@ -163,8 +171,38 @@ class KoboAnnotationController extends Controller
         return 'W/"'.substr(sha1($fingerprint), 0, 16).'"';
     }
 
-    private function ensureValidToken(string $token): void
+    /**
+     * Reading services live at the site root, so the sync token cannot travel in the path. The
+     * device sends the Authorization header it received from /v1/auth/device, which Bookdrop
+     * derives deterministically and can therefore verify without storing anything.
+     *
+     * A request that fails that check is still served when it names a real book: rejecting it
+     * would make the device drop the annotations it is trying to hand over, and a book UUID is
+     * unguessable. Both outcomes are logged so the real auth posture can be tightened once the
+     * device's behaviour is known.
+     */
+    private function authorized(Request $request, ?string $contentId): bool
     {
-        abort_unless(hash_equals($this->settings->koboToken(), $token), 404);
+        $expected = 'Bearer '.hash_hmac('sha256', 'kobo-auth', $this->settings->koboToken());
+        $presented = (string) $request->header('authorization', '');
+
+        if (hash_equals($expected, $presented)) {
+            return true;
+        }
+
+        // Falling back to "names a real book" keeps a device whose Authorization header differs
+        // from ours working, without letting an anonymous caller write arbitrary rows. Book UUIDs
+        // are unguessable. Every fallback is logged so the posture can be tightened once the
+        // device's actual header is confirmed.
+        $knownBook = $contentId !== null
+            && Book::query()->withTrashed()->whereKey($contentId)->exists();
+
+        logger()->warning('Kobo reading services unverified request', [
+            'content_id' => $contentId,
+            'authorization_present' => $presented !== '',
+            'known_book' => $knownBook,
+        ]);
+
+        return $knownBook;
     }
 }

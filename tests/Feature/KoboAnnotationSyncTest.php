@@ -46,7 +46,7 @@ class KoboAnnotationSyncTest extends TestCase
     {
         $book = $this->book();
 
-        $response = $this->getJson($this->url("api/v3/content/{$book->id}/annotations"));
+        $response = $this->withHeaders($this->deviceAuth())->getJson($this->url("api/v3/content/{$book->id}/annotations"));
 
         $response->assertOk()->assertJsonPath('annotations', [])->assertJsonPath('nextPageOffsetToken', null);
 
@@ -59,7 +59,7 @@ class KoboAnnotationSyncTest extends TestCase
     {
         $book = $this->book();
 
-        $this->patchJson($this->url("api/v3/content/{$book->id}/annotations"), [
+        $this->withHeaders($this->deviceAuth())->patchJson($this->url("api/v3/content/{$book->id}/annotations"), [
             'updatedAnnotations' => [$this->annotation('anno-1')],
         ])->assertOk()->assertJsonPath('result', 'ok');
 
@@ -77,11 +77,11 @@ class KoboAnnotationSyncTest extends TestCase
     public function test_stored_annotations_come_back_with_an_etag_and_then_304(): void
     {
         $book = $this->book();
-        $this->patchJson($this->url("api/v3/content/{$book->id}/annotations"), [
+        $this->withHeaders($this->deviceAuth())->patchJson($this->url("api/v3/content/{$book->id}/annotations"), [
             'updatedAnnotations' => [$this->annotation('anno-1')],
         ])->assertOk();
 
-        $response = $this->getJson($this->url("api/v3/content/{$book->id}/annotations"));
+        $response = $this->withHeaders($this->deviceAuth())->getJson($this->url("api/v3/content/{$book->id}/annotations"));
         $response->assertOk()->assertJsonCount(1, 'annotations');
 
         $etag = (string) $response->headers->get('etag');
@@ -98,11 +98,11 @@ class KoboAnnotationSyncTest extends TestCase
         $book = $this->book();
         $path = $this->url("api/v3/content/{$book->id}/annotations");
 
-        $this->patchJson($path, ['updatedAnnotations' => [$this->annotation('anno-1')]])->assertOk();
-        $first = (string) $this->getJson($path)->headers->get('etag');
+        $this->withHeaders($this->deviceAuth())->patchJson($path, ['updatedAnnotations' => [$this->annotation('anno-1')]])->assertOk();
+        $first = (string) $this->withHeaders($this->deviceAuth())->getJson($path)->headers->get('etag');
 
-        $this->patchJson($path, ['updatedAnnotations' => [$this->annotation('anno-2')]])->assertOk();
-        $second = (string) $this->getJson($path)->headers->get('etag');
+        $this->withHeaders($this->deviceAuth())->patchJson($path, ['updatedAnnotations' => [$this->annotation('anno-2')]])->assertOk();
+        $second = (string) $this->withHeaders($this->deviceAuth())->getJson($path)->headers->get('etag');
 
         $this->assertNotSame($first, $second);
         $this->assertSame(2, Annotation::query()->count());
@@ -113,11 +113,11 @@ class KoboAnnotationSyncTest extends TestCase
         $book = $this->book();
         $path = $this->url("api/v3/content/{$book->id}/annotations");
 
-        $this->patchJson($path, ['updatedAnnotations' => [$this->annotation('anno-1')]])->assertOk();
+        $this->withHeaders($this->deviceAuth())->patchJson($path, ['updatedAnnotations' => [$this->annotation('anno-1')]])->assertOk();
 
         $edited = $this->annotation('anno-1');
         $edited['noteText'] = 'edited note';
-        $this->patchJson($path, ['updatedAnnotations' => [$edited]])->assertOk();
+        $this->withHeaders($this->deviceAuth())->patchJson($path, ['updatedAnnotations' => [$edited]])->assertOk();
 
         $this->assertSame(1, Annotation::query()->count());
         $this->assertSame('edited note', Annotation::query()->sole()->note_text);
@@ -129,15 +129,15 @@ class KoboAnnotationSyncTest extends TestCase
         $path = $this->url("api/v3/content/{$book->id}/annotations");
 
         // Device holds annotations, server has none: must be reported so the upload is triggered.
-        $this->postJson($this->url('api/v3/content/checkforchanges'), [
+        $this->withHeaders($this->deviceAuth())->postJson($this->url('api/v3/content/checkforchanges'), [
             ['ContentId' => $book->id, 'etag' => 'W/"something"'],
         ])->assertOk()->assertExactJson([$book->id]);
 
-        $this->patchJson($path, ['updatedAnnotations' => [$this->annotation('anno-1')]])->assertOk();
-        $etag = (string) $this->getJson($path)->headers->get('etag');
+        $this->withHeaders($this->deviceAuth())->patchJson($path, ['updatedAnnotations' => [$this->annotation('anno-1')]])->assertOk();
+        $etag = (string) $this->withHeaders($this->deviceAuth())->getJson($path)->headers->get('etag');
 
         // Matching ETag: nothing to do.
-        $this->postJson($this->url('api/v3/content/checkforchanges'), [
+        $this->withHeaders($this->deviceAuth())->postJson($this->url('api/v3/content/checkforchanges'), [
             ['ContentId' => $book->id, 'etag' => $etag],
         ])->assertOk()->assertExactJson([]);
     }
@@ -147,7 +147,7 @@ class KoboAnnotationSyncTest extends TestCase
         $book = $this->book();
 
         // W/"0" is the device saying it holds no annotations either.
-        $this->postJson($this->url('api/v3/content/checkforchanges'), [
+        $this->withHeaders($this->deviceAuth())->postJson($this->url('api/v3/content/checkforchanges'), [
             ['ContentId' => $book->id, 'etag' => 'W/"0"'],
         ])->assertOk()->assertExactJson([]);
     }
@@ -161,11 +161,23 @@ class KoboAnnotationSyncTest extends TestCase
         $this->assertSame(0, Annotation::query()->count());
     }
 
-    public function test_annotation_routes_require_the_sync_token(): void
+    public function test_an_unknown_caller_gets_a_safe_empty_answer_never_a_404(): void
     {
-        $book = $this->book();
+        // A 404 on these routes was present when a highlight was destroyed, so an unrecognised
+        // caller receives the empty-store shape instead: no ETag, nothing deleted, nothing stored.
+        $response = $this->getJson('/api/v3/content/'.Str::uuid()->toString().'/annotations');
 
-        $this->getJson('/kobo/wrong-token/api/v3/content/'.$book->id.'/annotations')->assertNotFound();
+        $response->assertOk()->assertJsonPath('annotations', []);
+        $this->assertNull($response->headers->get('etag'));
+    }
+
+    public function test_an_unauthorised_upload_is_acknowledged_but_not_stored(): void
+    {
+        $this->patchJson('/api/v3/content/'.Str::uuid()->toString().'/annotations', [
+            'updatedAnnotations' => [$this->annotation('anno-1')],
+        ])->assertOk();
+
+        $this->assertSame(0, Annotation::query()->count());
     }
 
     /** @return array<string, mixed> */
@@ -188,9 +200,21 @@ class KoboAnnotationSyncTest extends TestCase
         ];
     }
 
+    /**
+     * Store-API paths keep the tokenised prefix; reading-services paths are at the root, because
+     * the device discards any path in reading_services_host.
+     */
     private function url(string $path): string
     {
-        return '/kobo/'.self::TOKEN.'/'.$path;
+        return str_starts_with($path, 'api/v3/')
+            ? '/'.$path
+            : '/kobo/'.self::TOKEN.'/'.$path;
+    }
+
+    /** The Authorization header the device receives from /v1/auth/device. */
+    private function deviceAuth(): array
+    {
+        return ['Authorization' => 'Bearer '.hash_hmac('sha256', 'kobo-auth', self::TOKEN)];
     }
 
     private function book(): Book
