@@ -12,7 +12,10 @@ return Application::configure(basePath: dirname(__DIR__))
     )
     ->withMiddleware(function (Middleware $middleware): void {
         $middleware->trustProxies(at: ['127.0.0.1', '10.0.0.0/8', '172.16.0.0/12']);
-        $middleware->validateCsrfTokens(except: ['kobo/*']);
+        // Kobo devices carry no CSRF token. 'api/v3/*' is the reading-services (annotation) API,
+        // which lives at the site root because the device resolves reading_services_host as an
+        // origin; without this its POST/PATCH uploads are rejected with 419.
+        $middleware->validateCsrfTokens(except: ['kobo/*', 'api/v3/*']);
     })
     ->withExceptions(function (Exceptions $exceptions): void {
         //

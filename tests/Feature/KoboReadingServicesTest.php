@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Models\Setting;
+use Illuminate\Foundation\Http\Middleware\PreventRequestForgery;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 
@@ -77,6 +78,20 @@ class KoboReadingServicesTest extends TestCase
         $this->postJson('/api/v3/content/checkforchanges', [])->assertOk();
         $this->getJson("/api/v3/content/{$id}/annotations")->assertOk();
         $this->patchJson("/api/v3/content/{$id}/annotations", ['updatedAnnotations' => []])->assertOk();
+    }
+
+    public function test_the_annotation_routes_are_exempt_from_csrf(): void
+    {
+        // Kobo devices send no CSRF token, so POST/PATCH uploads were rejected with 419 in
+        // production. This cannot be caught by a normal request test: PreventRequestForgery
+        // short-circuits via runningUnitTests(), so the exemption list is asserted directly.
+        $property = new \ReflectionProperty(
+            PreventRequestForgery::class,
+            'neverVerify'
+        );
+
+        $this->assertContains('api/v3/*', $property->getValue(), 'reading-services uploads would 419');
+        $this->assertContains('kobo/*', $property->getValue());
     }
 
     public function test_other_reading_services_paths_are_logged_and_404(): void
