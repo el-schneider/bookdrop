@@ -4,6 +4,11 @@ return [
     'storage_disk' => env('BOOKDROP_STORAGE_DISK', 'bookdrop'),
     'books_path' => trim(env('BOOKDROP_BOOKS_PATH', 'books'), '/'),
     'covers_path' => trim(env('BOOKDROP_COVERS_PATH', 'covers'), '/'),
+    'kepubs_path' => trim(env('BOOKDROP_KEPUBS_PATH', 'kepubs'), '/'),
+
+    // Empty means "find kepubify on PATH". Conversion is skipped when the binary is absent.
+    'kepubify_path' => env('BOOKDROP_KEPUBIFY_PATH', ''),
+    'kepubify_timeout' => (int) env('BOOKDROP_KEPUBIFY_TIMEOUT', 120),
 
     // Display only. Timestamps are always stored in UTC (config/app.php pins the app timezone),
     // and are converted to this zone when rendered.

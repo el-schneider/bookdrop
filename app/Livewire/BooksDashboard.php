@@ -4,6 +4,7 @@ namespace App\Livewire;
 
 use App\Models\Book;
 use App\Services\EpubMetadataExtractor;
+use App\Services\KepubConverter;
 use App\Services\SettingsService;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
@@ -77,6 +78,10 @@ class BooksDashboard extends Component
         $originalFilename = Str::limit($upload->getClientOriginalName(), 255, '');
         $metadata = $metadataExtractor->extract(Storage::disk($disk)->path($storedPath));
 
+        // Conversion failure is not fatal: the original EPUB still syncs, just without KEPUB
+        // progress precision and highlights.
+        $kepubPath = app(KepubConverter::class)->convert($storedPath);
+
         Book::query()->create([
             'title' => Str::limit($metadata['title'] ?: $this->titleFromFilename($originalFilename), 255, ''),
             'author' => $metadata['author'] ? Str::limit($metadata['author'], 255, '') : null,
@@ -92,6 +97,7 @@ class BooksDashboard extends Component
             'language' => $this->limited($metadata['language'] ?? null),
             'publisher' => $this->limited($metadata['publisher'] ?? null),
             'published_at' => $metadata['published_at'] ?? null,
+            'kepub_path' => $kepubPath,
         ]);
     }
 

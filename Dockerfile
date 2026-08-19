@@ -19,6 +19,17 @@ RUN npm run build
 
 FROM php:8.4-apache AS app
 
+# Kepubify converts EPUB to Kobo's KEPUB. Without it the device tracks progress only per chapter
+# and cannot create highlights at all on synced books. Statically linked Go binary, no runtime deps.
+# Pinned and checksummed: this runs in the production image.
+ARG KEPUBIFY_VERSION=v4.0.4
+ARG KEPUBIFY_SHA256=37d7628d26c5c906f607f24b36f781f306075e7073a6fe7820a751bb60431fc5
+ADD --chmod=755 https://github.com/pgaskin/kepubify/releases/download/${KEPUBIFY_VERSION}/kepubify-linux-64bit /usr/local/bin/kepubify
+# Exit codes below 126 mean the binary actually ran; 126/127 would mean wrong architecture or
+# missing. Checked this way rather than via a specific flag, whose name is not guaranteed.
+RUN echo "${KEPUBIFY_SHA256}  /usr/local/bin/kepubify" | sha256sum -c - \
+    && (kepubify --help >/dev/null 2>&1; [ $? -lt 126 ] || (echo 'kepubify did not execute' >&2; exit 1))
+
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         libzip-dev \

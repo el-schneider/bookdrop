@@ -378,12 +378,23 @@ class KoboController extends Controller
     {
         $this->ensureValidToken($token);
         $book = $this->findBook($bookId);
+        $kepub = $this->kepubPath($book);
 
-        $this->abortIfMissingFile($book);
+        if ($kepub === null) {
+            $this->abortIfMissingFile($book);
+        }
+
+        $disk = Storage::disk((string) config('bookdrop.storage_disk'));
+
+        // Kobo recognises the .kepub.epub suffix; serving converted bytes under a plain .epub
+        // name makes the device treat it as a normal EPUB and discard the KEPUB features.
+        $filename = $kepub === null
+            ? $book->original_filename
+            : pathinfo($book->original_filename, PATHINFO_FILENAME).'.kepub.epub';
 
         return response()->download(
-            Storage::disk((string) config('bookdrop.storage_disk'))->path($book->stored_path),
-            $book->original_filename,
+            $disk->path($kepub ?? $book->stored_path),
+            $filename,
             ['Content-Type' => 'application/epub+zip']
         );
     }
@@ -773,7 +784,11 @@ class KoboController extends Controller
     {
         $url = $this->settings->publicBaseUrl($request).'/kobo/'.$token.'/v1/books/'.$book->id.'/download';
 
-        return collect(['EPUB3', 'EPUB'])
+        // A KEPUB is offered on its own: advertising both lets the device pick the plain EPUB,
+        // which is exactly the case that loses in-chapter progress and highlights.
+        $formats = $this->kepubPath($book) !== null ? ['KEPUB'] : ['EPUB3', 'EPUB'];
+
+        return collect($formats)
             ->map(fn (string $format): array => [
                 'DrmType' => 'None',
                 'Format' => $format,
@@ -782,6 +797,20 @@ class KoboController extends Controller
                 'Url' => $url,
             ])
             ->all();
+    }
+
+    /**
+     * The converted file, when one exists and is still on disk.
+     */
+    private function kepubPath(Book $book): ?string
+    {
+        if (blank($book->kepub_path)) {
+            return null;
+        }
+
+        $disk = Storage::disk((string) config('bookdrop.storage_disk'));
+
+        return $disk->exists($book->kepub_path) ? $book->kepub_path : null;
     }
 
     private function koboDate(Book $book): string

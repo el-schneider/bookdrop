@@ -22,6 +22,7 @@ use Illuminate\Database\Eloquent\SoftDeletes;
     'language',
     'publisher',
     'published_at',
+    'kepub_path',
 ])]
 class Book extends Model
 {

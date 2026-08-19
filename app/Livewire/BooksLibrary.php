@@ -26,8 +26,9 @@ class BooksLibrary extends Component
     public function delete(string $bookId): void
     {
         $book = Book::query()->findOrFail($bookId);
+        $disk = Storage::disk((string) config('bookdrop.storage_disk'));
 
-        Storage::disk((string) config('bookdrop.storage_disk'))->delete($book->stored_path);
+        $disk->delete(array_filter([$book->stored_path, $book->kepub_path]));
         $book->delete();
 
         session()->flash('status', 'Book deleted.');
