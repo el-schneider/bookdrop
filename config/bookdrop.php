@@ -3,6 +3,10 @@
 return [
     'storage_disk' => env('BOOKDROP_STORAGE_DISK', 'bookdrop'),
     'books_path' => trim(env('BOOKDROP_BOOKS_PATH', 'books'), '/'),
+    'covers_path' => trim(env('BOOKDROP_COVERS_PATH', 'covers'), '/'),
+
+    // Kobo devices time out a sync after roughly 30 seconds, so responses are paged.
+    'sync_item_limit' => (int) env('BOOKDROP_SYNC_ITEM_LIMIT', 100),
     'public_base_url' => env('BOOKDROP_PUBLIC_BASE_URL'),
 
     // Opt-in recording of Kobo device traffic, for building replayable test fixtures.

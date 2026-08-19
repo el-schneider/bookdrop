@@ -16,6 +16,13 @@ use Symfony\Component\HttpFoundation\Response;
 
 class KoboController extends Controller
 {
+    /** Cover formats the extractor can emit, keyed by the extension used on disk. */
+    private const COVER_EXTENSIONS = [
+        'jpg' => 'image/jpeg',
+        'png' => 'image/png',
+        'webp' => 'image/webp',
+    ];
+
     public function __construct(private readonly SettingsService $settings) {}
 
     public function authDevice(Request $request, string $token): JsonResponse
@@ -69,25 +76,36 @@ class KoboController extends Controller
 
         $disk = Storage::disk((string) config('bookdrop.storage_disk'));
         $syncToken = $this->syncToken($request);
-        $books = $this->booksForSync($syncToken)
+        $limit = max(1, (int) config('bookdrop.sync_item_limit'));
+
+        // Books whose file is missing are dropped, so the limit cannot be applied in SQL: an
+        // under-filled page would look exhaustive and the cursor would advance past books that
+        // were never delivered.
+        // ponytail: loads all pending rows; fine for a personal library, revisit past ~10k books.
+        $candidates = $this->booksForSync($syncToken)
             ->filter(fn (Book $book): bool => $disk->exists($book->stored_path))
-            ->map(fn (Book $book): array => [
-                'NewEntitlement' => [
-                    'BookEntitlement' => $this->bookEntitlement($book),
-                    'BookMetadata' => $this->bookMetadata($book, $request, $token),
-                ],
-            ])
             ->values();
+
+        $hasMore = $candidates->count() > $limit;
+        $page = $candidates->take($limit)->values();
+
+        $entitlements = $page->map(fn (Book $book): array => [
+            'NewEntitlement' => [
+                'BookEntitlement' => $this->bookEntitlement($book),
+                'BookMetadata' => $this->bookMetadata($book, $request, $token),
+            ],
+        ])->values();
 
         $this->logKoboRequest('library.sync', $request, [
             'sync_token_present' => $syncToken !== null,
             'sync_mode' => $syncToken === null ? 'full' : 'delta',
-            'book_count' => $books->count(),
+            'book_count' => $entitlements->count(),
+            'has_more' => $hasMore,
         ]);
 
-        return response()->json($books)
-            ->header('x-kobo-sync', 'complete')
-            ->header('x-kobo-synctoken', now()->toIso8601String());
+        return response()->json($entitlements)
+            ->header('x-kobo-sync', $hasMore ? 'continue' : 'complete')
+            ->header('x-kobo-synctoken', $this->nextSyncToken($request, $page));
     }
 
     public function metadata(Request $request, string $token, string $bookId): JsonResponse
@@ -107,18 +125,24 @@ class KoboController extends Controller
         $this->ensureValidToken($token);
         $book = Book::query()->whereKey($bookId)->first();
 
-        return response()->json([
-            'ReadingState' => [
-                'EntitlementId' => $book?->id ?? $bookId,
-                'StatusInfo' => [
-                    'Status' => 'ReadyToRead',
-                ],
-                'CurrentBookmark' => null,
-                'Statistics' => [
-                    'SpentReadingMinutes' => 0,
-                ],
+        // Kobo expects a bare array of reading states, not an object wrapping one.
+        return response()->json([[
+            'EntitlementId' => $book?->id ?? $bookId,
+            'Created' => $this->koboTimestamp($book?->uploaded_at),
+            'LastModified' => $this->koboTimestamp(null),
+            'PriorityTimestamp' => $this->koboTimestamp(null),
+            'StatusInfo' => [
+                'LastModified' => $this->koboTimestamp(null),
+                'Status' => 'ReadyToRead',
+                'TimesStartedReading' => 0,
             ],
-        ]);
+            'Statistics' => [
+                'LastModified' => $this->koboTimestamp(null),
+            ],
+            'CurrentBookmark' => [
+                'LastModified' => $this->koboTimestamp(null),
+            ],
+        ]]);
     }
 
     public function putState(string $token, string $bookId): JsonResponse
@@ -138,11 +162,29 @@ class KoboController extends Controller
         ]);
     }
 
-    public function deleteEntitlement(string $token, string $bookId): JsonResponse
+    public function deleteEntitlement(string $token, string $bookId): Response
     {
         $this->ensureValidToken($token);
 
-        return response()->json(['Result' => 'Success']);
+        return response()->noContent();
+    }
+
+    public function loyaltyBenefits(string $token): JsonResponse
+    {
+        $this->ensureValidToken($token);
+
+        return response()->json(['Benefits' => (object) []]);
+    }
+
+    public function analyticsTests(Request $request, string $token): JsonResponse
+    {
+        $this->ensureValidToken($token);
+
+        return response()->json([
+            'Result' => 'Success',
+            'TestKey' => (string) $request->header('x-kobo-userkey', ''),
+            'Tests' => (object) [],
+        ]);
     }
 
     public function analytics(string $token, ?string $path = null): JsonResponse
@@ -175,9 +217,7 @@ class KoboController extends Controller
             return $this->placeholderCover();
         }
 
-        $cover = app(EpubMetadataExtractor::class)->cover(
-            Storage::disk((string) config('bookdrop.storage_disk'))->path($book->stored_path)
-        );
+        $cover = $this->cachedCover($book);
 
         if (! $cover) {
             return $this->placeholderCover();
@@ -237,18 +277,105 @@ class KoboController extends Controller
             ->header('Cache-Control', 'public, max-age=300');
     }
 
-    private function booksForSync(?Carbon $syncToken): Collection
+    /**
+     * @param  array{at: Carbon, id: string|null}|null  $cursor
+     */
+    private function booksForSync(?array $cursor): Collection
     {
-        $query = Book::query()->orderBy('uploaded_at');
+        // uploaded_at has second precision, so several books can share one value. Ordering and
+        // resuming on (uploaded_at, id) keeps the cursor unambiguous; resuming on the timestamp
+        // alone would permanently skip the rest of a group split across two pages.
+        $query = Book::query()->orderBy('uploaded_at')->orderBy('id');
 
-        if ($syncToken !== null) {
-            $query->where('uploaded_at', '>', $syncToken);
+        if ($cursor !== null) {
+            $query->where(function ($query) use ($cursor): void {
+                $query->where('uploaded_at', '>', $cursor['at'])
+                    ->orWhere(function ($query) use ($cursor): void {
+                        $query->where('uploaded_at', '=', $cursor['at']);
+
+                        if ($cursor['id'] !== null) {
+                            $query->where('id', '>', $cursor['id']);
+                        } else {
+                            $query->whereRaw('1 = 0');
+                        }
+                    });
+            });
         }
 
         return $query->get();
     }
 
-    private function syncToken(Request $request): ?Carbon
+    /**
+     * The device replays this token on its next request. It must identify the last book actually
+     * delivered; "now" would skip anything uploaded in the same second as this response.
+     *
+     * @param  \Illuminate\Support\Collection<int, Book>  $page
+     */
+    private function nextSyncToken(Request $request, $page): string
+    {
+        if ($page->isNotEmpty()) {
+            $last = $page->last();
+
+            return $last->uploaded_at->toIso8601String().'|'.$last->id;
+        }
+
+        // Nothing was delivered, so the device's position is unchanged. Echoing its own token back
+        // avoids advancing past books it has never seen.
+        $current = (string) $request->header('x-kobo-synctoken', '');
+
+        return $current !== '' ? $current : Carbon::createFromTimestamp(0)->toIso8601String();
+    }
+
+    /**
+     * The device requests the same cover at several sizes on every sync. Extracting it means
+     * unzipping the EPUB, so keep the extracted image on disk and reuse it.
+     *
+     * @return array{data: string, mime: string}|null
+     */
+    private function cachedCover(Book $book): ?array
+    {
+        $disk = Storage::disk((string) config('bookdrop.storage_disk'));
+        $directory = trim((string) config('bookdrop.covers_path'), '/');
+
+        foreach (self::COVER_EXTENSIONS as $extension => $mime) {
+            $cached = $directory.'/'.$book->id.'.'.$extension;
+
+            if ($disk->exists($cached)) {
+                return ['data' => (string) $disk->get($cached), 'mime' => $mime];
+            }
+        }
+
+        $cover = app(EpubMetadataExtractor::class)->cover($disk->path($book->stored_path));
+
+        if (! $cover) {
+            return null;
+        }
+
+        // The extractor can return whatever MIME the EPUB declares. Caching an unrecognised type
+        // under .jpg would make every later request serve it as image/jpeg regardless of content,
+        // so only known formats are cached; the rest are served straight through.
+        $extension = array_search($cover['mime'], self::COVER_EXTENSIONS, true);
+
+        if ($extension !== false) {
+            $disk->put($directory.'/'.$book->id.'.'.$extension, $cover['data']);
+        }
+
+        return $cover;
+    }
+
+    private function koboTimestamp(?Carbon $moment): string
+    {
+        return ($moment ?? now())->utc()->format('Y-m-d\TH:i:s\Z');
+    }
+
+    /**
+     * Accepts our composite "<iso>|<book id>" token and the bare ISO token issued before paging
+     * existed, which devices in the field are still holding. A token minted by Kobo's own store
+     * (shape "blob.blob") is unparseable here and correctly degrades to a full sync.
+     *
+     * @return array{at: Carbon, id: string|null}|null
+     */
+    private function syncToken(Request $request): ?array
     {
         $syncToken = $request->header('x-kobo-synctoken');
 
@@ -256,8 +383,12 @@ class KoboController extends Controller
             return null;
         }
 
+        [$timestamp, $id] = array_pad(explode('|', (string) $syncToken, 2), 2, null);
+
         try {
-            return Carbon::parse($syncToken);
+            // Canonicalised to UTC so a token expressed in another offset still compares against
+            // the stored timestamps identically.
+            return ['at' => Carbon::parse($timestamp)->utc(), 'id' => $id];
         } catch (\Throwable $exception) {
             $this->logKoboRequest('library.sync.invalid_token', $request, [
                 'error' => $exception::class,

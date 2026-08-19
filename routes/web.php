@@ -32,6 +32,8 @@ Route::prefix('kobo/{token}')->middleware(RecordKoboTraffic::class)->group(funct
     Route::get('v1/library/{bookId}/state', [KoboController::class, 'getState'])->name('kobo.library.state.show');
     Route::put('v1/library/{bookId}/state', [KoboController::class, 'putState'])->name('kobo.library.state.update');
     Route::delete('v1/library/{bookId}', [KoboController::class, 'deleteEntitlement'])->name('kobo.library.delete');
+    Route::match(['get', 'post'], 'v1/analytics/gettests', [KoboController::class, 'analyticsTests'])->name('kobo.analytics.gettests');
+    Route::get('v1/user/loyalty/benefits', [KoboController::class, 'loyaltyBenefits'])->name('kobo.user.loyalty.benefits');
     Route::match(['post', 'put'], 'v1/analytics/{path?}', [KoboController::class, 'analytics'])->where('path', '.*')->name('kobo.analytics');
     Route::get('v1/books/{bookId}/download', [KoboController::class, 'download'])->name('kobo.books.download');
     Route::get('{bookId}/{width}/{height}/{isGreyscale}/image.jpg', [KoboController::class, 'cover'])->name('kobo.books.cover');
