@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\KoboAnnotationController;
 use App\Http\Controllers\KoboController;
 use App\Http\Controllers\LibraryCoverController;
 use App\Http\Middleware\RecordKoboTraffic;
@@ -32,6 +33,12 @@ Route::prefix('kobo/{token}')->middleware(RecordKoboTraffic::class)->group(funct
     Route::get('v1/library/{bookId}/state', [KoboController::class, 'getState'])->name('kobo.library.state.show');
     Route::put('v1/library/{bookId}/state', [KoboController::class, 'putState'])->name('kobo.library.state.update');
     Route::delete('v1/library/{bookId}', [KoboController::class, 'deleteEntitlement'])->name('kobo.library.delete');
+    // Annotation sync. Must stay above the catch-all below, which would otherwise answer these
+    // with an empty body and make the device believe its highlights were accepted.
+    Route::post('api/v3/content/checkforchanges', [KoboAnnotationController::class, 'checkForChanges'])->name('kobo.annotations.changes');
+    Route::get('api/v3/content/{contentId}/annotations', [KoboAnnotationController::class, 'index'])->name('kobo.annotations.index');
+    Route::match(['patch', 'put'], 'api/v3/content/{contentId}/annotations', [KoboAnnotationController::class, 'update'])->name('kobo.annotations.update');
+
     Route::match(['get', 'post'], 'v1/analytics/gettests', [KoboController::class, 'analyticsTests'])->name('kobo.analytics.gettests');
     Route::get('v1/user/loyalty/benefits', [KoboController::class, 'loyaltyBenefits'])->name('kobo.user.loyalty.benefits');
     Route::match(['post', 'put'], 'v1/analytics/{path?}', [KoboController::class, 'analytics'])->where('path', '.*')->name('kobo.analytics');

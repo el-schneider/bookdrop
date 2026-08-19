@@ -65,6 +65,10 @@ class KoboController extends Controller
                 'reading_state' => $base.'/v1/library/{Ids}/state',
                 'delete_entitlement' => $base.'/v1/library/{Ids}',
                 'post_analytics_event' => $base.'/v1/analytics/event',
+                // Points annotation sync at Bookdrop instead of Kobo's servers. Without this the
+                // device keeps sending highlights to readingservices.kobo.com, where a sideloaded
+                // book has no entitlement.
+                'reading_services_host' => $base,
                 'image_host' => $this->settings->publicBaseUrl($request),
                 'image_url_template' => $base.'/{ImageId}/{width}/{height}/false/image.jpg',
                 'image_url_quality_template' => $base.'/{ImageId}/{width}/{height}/{Quality}/false/image.jpg',
