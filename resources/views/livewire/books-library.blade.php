@@ -106,7 +106,7 @@
                                     <td class="font-medium">{{ $book->title }}</td>
                                     <td class="bd-muted">{{ $book->author ?: '—' }}</td>
                                     <td class="bd-muted">{{ $book->original_filename }}</td>
-                                    <td class="bd-muted">{{ $book->uploaded_at?->isoFormat('L LT') }}</td>
+                                    <td class="bd-muted">{{ $book->uploaded_at?->timezone(config('bookdrop.display_timezone'))->isoFormat('L LT') }}</td>
                                     <td class="bd-muted">
                                         @if ($book->readingState)
                                             <div>{{ $book->readingState->statusLabel() }} · {{ $book->readingState->percent() }}%</div>

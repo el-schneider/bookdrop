@@ -7,6 +7,7 @@ use App\Models\Book;
 use App\Models\ReadingState;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Storage;
 use Livewire\Livewire;
 use Tests\TestCase;
@@ -49,6 +50,21 @@ class BooksLibraryTest extends TestCase
         Livewire::test(BooksLibrary::class)
             ->assertSee('—')
             ->assertDontSee('0%');
+    }
+
+    public function test_timestamps_are_stored_in_utc_and_only_shifted_for_display(): void
+    {
+        config()->set('bookdrop.display_timezone', 'Europe/Berlin');
+        config()->set('app.locale', 'de');
+        Carbon::setLocale('de');
+
+        $book = $this->book('Timed Book');
+        $book->forceFill(['uploaded_at' => '2026-08-19 20:28:00'])->save();
+
+        // Stored value must stay UTC; only the rendered string moves (+2h in August).
+        $this->assertSame('2026-08-19 20:28:00', $book->fresh()->getRawOriginal('uploaded_at'));
+
+        Livewire::test(BooksLibrary::class)->assertSee('19.08.2026 22:28');
     }
 
     public function test_finished_books_read_as_finished(): void

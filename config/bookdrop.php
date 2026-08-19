@@ -5,6 +5,10 @@ return [
     'books_path' => trim(env('BOOKDROP_BOOKS_PATH', 'books'), '/'),
     'covers_path' => trim(env('BOOKDROP_COVERS_PATH', 'covers'), '/'),
 
+    // Display only. Timestamps are always stored in UTC (config/app.php pins the app timezone),
+    // and are converted to this zone when rendered.
+    'display_timezone' => env('BOOKDROP_DISPLAY_TIMEZONE', 'UTC'),
+
     // Kobo devices time out a sync after roughly 30 seconds, so responses are paged.
     'sync_item_limit' => (int) env('BOOKDROP_SYNC_ITEM_LIMIT', 100),
     'public_base_url' => env('BOOKDROP_PUBLIC_BASE_URL'),
