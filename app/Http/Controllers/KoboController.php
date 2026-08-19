@@ -346,6 +346,12 @@ class KoboController extends Controller
     {
         $this->ensureValidToken($token);
 
+        // The device is telling us it dropped this book. Archiving it here is what makes the next
+        // sync confirm the removal with IsRemoved: true. Acknowledging without archiving leaves
+        // the book live on the server, which then re-offers it and leaves the device holding a
+        // row that claims the book is downloaded while its file is gone.
+        Book::query()->whereKey($bookId)->first()?->delete();
+
         return response()->noContent();
     }
 

@@ -9,6 +9,7 @@ use App\Services\EpubMetadataExtractor;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Str;
 use Illuminate\Testing\TestResponse;
 use Tests\TestCase;
 use ZipArchive;
@@ -54,11 +55,31 @@ class KoboProtocolTest extends TestCase
         $this->assertArrayHasKey(0, $response->json(), 'Kobo expects a bare array of reading states');
     }
 
-    public function test_deleting_an_entitlement_returns_no_content(): void
+    public function test_deleting_an_entitlement_archives_it_and_confirms_the_removal(): void
     {
         $book = $this->book('Book', 'books/book.epub', '2026-05-14 06:00:00');
+        Storage::disk('local')->put($book->stored_path, 'epub');
 
-        $this->delete($this->url("v1/library/{$book->id}"))
+        $first = $this->getJson($this->url('v1/library/sync'));
+        $first->assertOk()->assertJsonCount(1);
+
+        // The device reports that it dropped the book.
+        $this->delete($this->url("v1/library/{$book->id}"))->assertNoContent();
+
+        $this->assertTrue($book->fresh()->trashed(), 'the removal must be recorded, not just acknowledged');
+
+        // Acknowledging without archiving would leave the book live and re-offer it as a normal
+        // entitlement, leaving the device with a row claiming a file it no longer has.
+        $this->withHeader('x-kobo-synctoken', (string) $first->headers->get('x-kobo-synctoken'))
+            ->getJson($this->url('v1/library/sync'))
+            ->assertOk()
+            ->assertJsonCount(1)
+            ->assertJsonPath('0.ChangedEntitlement.BookEntitlement.IsRemoved', true);
+    }
+
+    public function test_deleting_an_unknown_entitlement_is_still_acknowledged(): void
+    {
+        $this->delete($this->url('v1/library/'.Str::uuid()->toString()))
             ->assertNoContent();
     }
 
