@@ -65,10 +65,13 @@ class KoboController extends Controller
                 'reading_state' => $base.'/v1/library/{Ids}/state',
                 'delete_entitlement' => $base.'/v1/library/{Ids}',
                 'post_analytics_event' => $base.'/v1/analytics/event',
-                // reading_services_host is deliberately NOT advertised. It is an ORIGIN, not a
-                // base URL: firmware 4.45.23697 discarded the tokenised path, sent annotation
-                // calls to the site root, received 404s, and destroyed a highlight on the device.
-                // Do not re-add until the root endpoints are proven by an observed sync.
+                // ORIGIN only, never a path: firmware 4.45.23697 discards any path here, which is
+                // why an earlier tokenised value produced 404s at the site root. Pointed at
+                // Bookdrop because the alternative is worse: left at Kobo's own servers, they hold
+                // no entitlement for a self-hosted book, report it as having no annotations, and
+                // the device deletes the local ones. Bookdrop's root endpoints answer in a shape
+                // that never triggers deletion.
+                'reading_services_host' => $this->settings->publicBaseUrl($request),
                 'image_host' => $this->settings->publicBaseUrl($request),
                 'image_url_template' => $base.'/{ImageId}/{width}/{height}/false/image.jpg',
                 'image_url_quality_template' => $base.'/{ImageId}/{width}/{height}/{Quality}/false/image.jpg',

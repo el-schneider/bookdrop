@@ -31,14 +31,15 @@ class KoboAnnotationSyncTest extends TestCase
         ]);
     }
 
-    public function test_reading_services_host_is_not_advertised_from_here(): void
+    public function test_reading_services_host_never_points_at_these_tokenised_routes(): void
     {
-        // Advertising a tokenised path for reading services sent the device's annotation calls to
-        // the site root, where they 404'd, and a highlight was destroyed. The device reaches the
-        // root routes instead; these tokenised endpoints exist only to keep this logic tested.
-        $this->getJson($this->url('v1/initialization'))
+        // The device discards any path in reading_services_host, so it can only ever reach the
+        // root routes. These tokenised endpoints exist solely to keep the storage logic tested.
+        $host = $this->getJson($this->url('v1/initialization'))
             ->assertOk()
-            ->assertJsonMissingPath('Resources.reading_services_host');
+            ->json('Resources.reading_services_host');
+
+        $this->assertSame('', (string) parse_url($host, PHP_URL_PATH), 'a path here is silently dropped by the device');
     }
 
     public function test_an_empty_store_answers_without_an_etag_so_the_device_uploads(): void

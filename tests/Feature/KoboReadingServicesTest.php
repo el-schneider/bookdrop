@@ -28,13 +28,16 @@ class KoboReadingServicesTest extends TestCase
         ]);
     }
 
-    public function test_the_broken_reading_services_host_is_no_longer_advertised(): void
+    public function test_reading_services_host_is_an_origin_with_no_path(): void
     {
-        // Advertising a tokenised path here sent annotation calls to the site root, produced 404s
-        // and destroyed a highlight on the device.
-        $this->getJson('/kobo/test-token/v1/initialization')
+        // A path here does not survive: the device discarded it, called the site root and got
+        // 404s. It must be the bare origin, which is where the root routes live.
+        $host = $this->getJson('/kobo/test-token/v1/initialization')
             ->assertOk()
-            ->assertJsonMissingPath('Resources.reading_services_host');
+            ->json('Resources.reading_services_host');
+
+        $this->assertSame('https://bookdrop.test', $host);
+        $this->assertSame('', (string) parse_url($host, PHP_URL_PATH));
     }
 
     public function test_checkforchanges_reports_nothing_so_no_reconciliation_can_delete(): void
