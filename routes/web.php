@@ -2,6 +2,7 @@
 
 use App\Http\Controllers\KoboController;
 use App\Http\Controllers\LibraryCoverController;
+use App\Http\Middleware\RecordKoboTraffic;
 use Illuminate\Support\Facades\Route;
 
 Route::view('/', 'welcome');
@@ -22,7 +23,7 @@ Route::view('profile', 'profile')
     ->middleware(['auth'])
     ->name('profile');
 
-Route::prefix('kobo/{token}')->group(function (): void {
+Route::prefix('kobo/{token}')->middleware(RecordKoboTraffic::class)->group(function (): void {
     Route::post('v1/auth/device', [KoboController::class, 'authDevice'])->name('kobo.auth.device');
     Route::post('v1/auth/refresh', [KoboController::class, 'authRefresh'])->name('kobo.auth.refresh');
     Route::get('v1/initialization', [KoboController::class, 'initialization'])->name('kobo.initialization');
