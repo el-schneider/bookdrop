@@ -54,12 +54,18 @@ class KoboSyncTest extends TestCase
         Storage::disk('local')->put($olderBook->stored_path, 'older');
         Storage::disk('local')->put($newerBook->stored_path, 'newer');
 
-        $response = $this->withHeader('x-kobo-synctoken', '2026-05-14T06:48:29+00:00')
+        // Sync once to obtain a real cursor, then confirm only the later upload comes back.
+        $first = $this->getJson('/kobo/test-token/v1/library/sync');
+        $first->assertOk()->assertJsonCount(2);
+
+        $newerBook->forceFill(['title' => 'Newer Book'])->save();
+
+        $response = $this->withHeader('x-kobo-synctoken', (string) $first->headers->get('x-kobo-synctoken'))
             ->getJson('/kobo/test-token/v1/library/sync');
 
         $response->assertOk()
             ->assertJsonCount(1)
-            ->assertJsonPath('0.NewEntitlement.BookMetadata.Title', 'Newer Book');
+            ->assertJsonPath('0.ChangedEntitlement.BookMetadata.Title', 'Newer Book');
     }
 
     public function test_invalid_sync_token_falls_back_to_full_sync(): void
@@ -87,7 +93,7 @@ class KoboSyncTest extends TestCase
 
     private function book(string $title, string $storedPath, string $uploadedAt): Book
     {
-        return Book::query()->create([
+        $book = Book::query()->create([
             'title' => $title,
             'author' => 'Test Author',
             'original_filename' => basename($storedPath),
@@ -96,5 +102,10 @@ class KoboSyncTest extends TestCase
             'size_bytes' => 123,
             'uploaded_at' => $uploadedAt,
         ]);
+
+        // A real upload stamps all three at once; sync filters on updated_at.
+        $book->forceFill(['created_at' => $uploadedAt, 'updated_at' => $uploadedAt])->saveQuietly();
+
+        return $book->refresh();
     }
 }

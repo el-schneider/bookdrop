@@ -81,11 +81,9 @@ class KoboProtocolTest extends TestCase
             ->assertHeader('x-kobo-sync', 'continue');
 
         // The token must identify the last book sent, not "now", or the remaining books are
-        // skipped entirely. It is composite so books sharing a timestamp stay distinguishable.
-        $this->assertSame(
-            $books[2]->uploaded_at->toIso8601String().'|'.$books[2]->id,
-            $first->headers->get('x-kobo-synctoken')
-        );
+        // skipped entirely. It carries an id so books sharing a timestamp stay distinguishable.
+        $cursor = $this->decodeToken((string) $first->headers->get('x-kobo-synctoken'));
+        $this->assertSame($books[2]->fresh()->revision, $cursor['revision']);
 
         $second = $this->withHeader('x-kobo-synctoken', (string) $first->headers->get('x-kobo-synctoken'))
             ->getJson($this->url('v1/library/sync'));
@@ -169,17 +167,178 @@ class KoboProtocolTest extends TestCase
         $this->assertSame(['Book 0', 'Book 2', 'Book 3'], $this->titlesOf($first, $second));
     }
 
-    public function test_a_legacy_bare_timestamp_token_still_resumes_correctly(): void
+    public function test_a_known_book_that_changes_is_reported_as_changed_not_new(): void
     {
-        // Devices in the field hold a bare ISO token issued before the composite format existed.
-        // Their next sync must resume, not restart or skip.
+        $book = $this->books(1)[0];
+
+        $first = $this->getJson($this->url('v1/library/sync'));
+        $first->assertOk()->assertJsonCount(1)->assertJsonStructure([['NewEntitlement']]);
+
+        $book->forceFill(['title' => 'Corrected Title', 'updated_at' => now()])->save();
+
+        $second = $this->withHeader('x-kobo-synctoken', (string) $first->headers->get('x-kobo-synctoken'))
+            ->getJson($this->url('v1/library/sync'));
+
+        $second->assertOk()
+            ->assertJsonCount(1)
+            ->assertJsonStructure([['ChangedEntitlement']])
+            ->assertJsonPath('0.ChangedEntitlement.BookMetadata.Title', 'Corrected Title');
+    }
+
+    public function test_deleting_a_book_tells_the_device_to_remove_it(): void
+    {
+        $book = $this->books(1)[0];
+
+        $first = $this->getJson($this->url('v1/library/sync'));
+        $first->assertOk()->assertJsonCount(1);
+
+        // Deleting removes the file too, so the removal must survive the missing-file filter.
+        Storage::disk('local')->delete($book->stored_path);
+        $book->delete();
+
+        $second = $this->withHeader('x-kobo-synctoken', (string) $first->headers->get('x-kobo-synctoken'))
+            ->getJson($this->url('v1/library/sync'));
+
+        $second->assertOk()
+            ->assertJsonCount(1)
+            ->assertJsonPath('0.ChangedEntitlement.BookEntitlement.IsRemoved', true)
+            ->assertJsonPath('0.ChangedEntitlement.BookEntitlement.Id', $book->id);
+    }
+
+    public function test_extracted_metadata_reaches_the_device(): void
+    {
+        $book = $this->books(1)[0];
+        $book->forceFill([
+            'series' => 'The Culture',
+            'series_index' => '2',
+            'description' => 'A description.',
+            'language' => 'de',
+            'publisher' => 'Orbit',
+        ])->save();
+
+        $response = $this->getJson($this->url('v1/library/sync'));
+
+        $response->assertOk()
+            ->assertJsonPath('0.NewEntitlement.BookMetadata.Series.Name', 'The Culture')
+            ->assertJsonPath('0.NewEntitlement.BookMetadata.Series.Number', 2)
+            ->assertJsonPath('0.NewEntitlement.BookMetadata.Language', 'de')
+            ->assertJsonPath('0.NewEntitlement.BookMetadata.Publisher.Name', 'Orbit')
+            ->assertJsonPath('0.NewEntitlement.BookMetadata.Description', 'A description.');
+
+        // Same series name must yield the same id on every sync, or the device sees a new series.
+        $again = $this->getJson($this->url('v1/library/sync'));
+        $this->assertSame(
+            $response->json('0.NewEntitlement.BookMetadata.Series.Id'),
+            $again->json('0.NewEntitlement.BookMetadata.Series.Id')
+        );
+    }
+
+    public function test_books_stay_new_across_a_paged_first_sync(): void
+    {
+        config()->set('bookdrop.sync_item_limit', 2);
+        $this->books(4);
+
+        $first = $this->getJson($this->url('v1/library/sync'));
+        $first->assertOk()->assertHeader('x-kobo-sync', 'continue')->assertJsonStructure([['NewEntitlement']]);
+
+        // Advancing the "created" watermark mid-run would demote the rest of the same first sync
+        // to ChangedEntitlement, for books the device has never seen.
+        $second = $this->withHeader('x-kobo-synctoken', (string) $first->headers->get('x-kobo-synctoken'))
+            ->getJson($this->url('v1/library/sync'));
+
+        $second->assertOk()->assertJsonStructure([['NewEntitlement']]);
+    }
+
+    public function test_the_created_watermark_survives_pages_ordered_differently_from_creation(): void
+    {
+        config()->set('bookdrop.sync_item_limit', 1);
+
+        $newest = $this->book('Newest', 'books/newest.epub', '2026-06-01 00:00:00');
+        $oldest = $this->book('Oldest', 'books/oldest.epub', '2026-05-01 00:00:00');
+        Storage::disk('local')->put($newest->stored_path, 'a');
+        Storage::disk('local')->put($oldest->stored_path, 'b');
+
+        // Touch the older-created book last so it sorts last by revision: the final page then
+        // holds the OLDEST creation date. A watermark read off the final page alone would settle
+        // below the newest book and later re-announce it as new.
+        $oldest->forceFill(['title' => 'Oldest'])->save();
+
+        $token = null;
+        do {
+            $response = $this->withHeader('x-kobo-synctoken', (string) $token)
+                ->getJson($this->url('v1/library/sync'));
+            $response->assertOk();
+            $token = $response->headers->get('x-kobo-synctoken');
+        } while ($response->headers->get('x-kobo-sync') === 'continue');
+
+        $this->assertSame(
+            $newest->created_at->utc()->toIso8601String(),
+            $this->decodeToken((string) $token)['created'],
+            'the watermark must reach the newest creation date seen anywhere in the run'
+        );
+
+        // Proof of the consequence: editing the newest book must be a change, never a new book.
+        $newest->forceFill(['title' => 'Newest Edited'])->save();
+
+        $this->withHeader('x-kobo-synctoken', (string) $token)
+            ->getJson($this->url('v1/library/sync'))
+            ->assertOk()
+            ->assertJsonCount(1)
+            ->assertJsonPath('0.ChangedEntitlement.BookMetadata.Title', 'Newest Edited');
+    }
+
+    public function test_a_legacy_token_replays_the_library_without_re_announcing_known_books(): void
+    {
+        // A device in the field holds a bare ISO token predating revisions. It cannot be mapped
+        // to a revision, so the library is replayed. Books the device already has must come back
+        // as changes; only books created after its token are genuinely new to it.
         $books = $this->books(3);
 
         $response = $this->withHeader('x-kobo-synctoken', $books[0]->uploaded_at->toIso8601String())
             ->getJson($this->url('v1/library/sync'));
 
-        $response->assertOk()->assertJsonCount(2);
-        $this->assertSame(['Book 1', 'Book 2'], $this->titlesOf($response));
+        $response->assertOk()->assertJsonCount(3);
+        $this->assertSame(['Book 0', 'Book 1', 'Book 2'], $this->titlesOf($response));
+
+        $this->assertArrayHasKey('ChangedEntitlement', $response->json('0'), 'already-held book');
+        $this->assertArrayHasKey('NewEntitlement', $response->json('1'), 'uploaded after the token');
+    }
+
+    public function test_a_change_made_in_the_same_second_as_a_sync_still_reaches_the_device(): void
+    {
+        $book = $this->books(1)[0];
+
+        $first = $this->getJson($this->url('v1/library/sync'));
+        $first->assertOk()->assertJsonCount(1);
+
+        // Same wall-clock second as the sync above. A timestamp cursor could not distinguish this
+        // from "already delivered" and would drop the change permanently.
+        $book->forceFill(['title' => 'Edited Same Second'])->save();
+
+        $this->withHeader('x-kobo-synctoken', (string) $first->headers->get('x-kobo-synctoken'))
+            ->getJson($this->url('v1/library/sync'))
+            ->assertOk()
+            ->assertJsonCount(1)
+            ->assertJsonPath('0.ChangedEntitlement.BookMetadata.Title', 'Edited Same Second');
+    }
+
+    public function test_a_removal_is_delivered_once_and_not_repeated(): void
+    {
+        $book = $this->books(1)[0];
+
+        $first = $this->getJson($this->url('v1/library/sync'));
+        $book->delete();
+
+        $second = $this->withHeader('x-kobo-synctoken', (string) $first->headers->get('x-kobo-synctoken'))
+            ->getJson($this->url('v1/library/sync'));
+        $second->assertOk()->assertJsonCount(1)
+            ->assertJsonPath('0.ChangedEntitlement.BookEntitlement.IsRemoved', true);
+
+        // A removal that repeats forever would make every sync non-empty.
+        $this->withHeader('x-kobo-synctoken', (string) $second->headers->get('x-kobo-synctoken'))
+            ->getJson($this->url('v1/library/sync'))
+            ->assertOk()
+            ->assertJsonCount(0);
     }
 
     public function test_an_empty_library_reports_a_cursor_that_replays_everything(): void
@@ -187,11 +346,11 @@ class KoboProtocolTest extends TestCase
         $response = $this->getJson($this->url('v1/library/sync'));
 
         $response->assertOk()->assertJsonCount(0);
-        $this->assertSame(
-            Carbon::createFromTimestamp(0)->toIso8601String(),
-            $response->headers->get('x-kobo-synctoken'),
-            'an empty first sync must not advance past books uploaded later'
-        );
+
+        $cursor = $this->decodeToken((string) $response->headers->get('x-kobo-synctoken'));
+
+        $this->assertSame(0, $cursor['revision'], 'an empty first sync must not advance past later uploads');
+        $this->assertSame(Carbon::createFromTimestamp(0)->utc()->toIso8601String(), $cursor['created']);
     }
 
     public function test_an_unrecognised_cover_format_is_served_but_never_cached(): void
@@ -214,13 +373,15 @@ class KoboProtocolTest extends TestCase
 
     public function test_an_empty_response_does_not_advance_the_devices_cursor(): void
     {
-        $books = $this->books(1);
-        $token = $books[0]->uploaded_at->toIso8601String().'|'.$books[0]->id;
+        $this->books(1);
 
-        $response = $this->withHeader('x-kobo-synctoken', $token)->getJson($this->url('v1/library/sync'));
+        $first = $this->getJson($this->url('v1/library/sync'));
+        $token = (string) $first->headers->get('x-kobo-synctoken');
 
-        $response->assertOk()->assertJsonCount(0);
-        $this->assertSame($token, $response->headers->get('x-kobo-synctoken'));
+        $second = $this->withHeader('x-kobo-synctoken', $token)->getJson($this->url('v1/library/sync'));
+
+        $second->assertOk()->assertJsonCount(0);
+        $this->assertSame($token, $second->headers->get('x-kobo-synctoken'));
     }
 
     public function test_loyalty_and_analytics_stubs_use_the_shapes_the_device_expects(): void
@@ -254,7 +415,9 @@ class KoboProtocolTest extends TestCase
 
         foreach ($responses as $response) {
             foreach ($response->json() as $item) {
-                $titles[] = $item['NewEntitlement']['BookMetadata']['Title'];
+                // An item is either a NewEntitlement or a ChangedEntitlement.
+                $entitlement = $item['NewEntitlement'] ?? $item['ChangedEntitlement'];
+                $titles[] = $entitlement['BookMetadata']['Title'];
             }
         }
 
@@ -301,7 +464,7 @@ class KoboProtocolTest extends TestCase
 
     private function book(string $title, string $storedPath, string $uploadedAt): Book
     {
-        return Book::query()->create([
+        $book = Book::query()->create([
             'title' => $title,
             'author' => 'Test Author',
             'original_filename' => basename($storedPath),
@@ -310,5 +473,17 @@ class KoboProtocolTest extends TestCase
             'size_bytes' => 123,
             'uploaded_at' => $uploadedAt,
         ]);
+
+        // A real upload stamps all three at once. Leaving created_at/updated_at at "now" while
+        // uploaded_at sits in the past would make every fixture look freshly modified.
+        return $book->forceFill(['created_at' => $uploadedAt, 'updated_at' => $uploadedAt])->saveQuietly()
+            ? $book->refresh()
+            : $book;
+    }
+
+    /** @return array<string, mixed> */
+    private function decodeToken(string $token): array
+    {
+        return (array) json_decode((string) base64_decode($token, true), true);
     }
 }

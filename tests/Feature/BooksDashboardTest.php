@@ -27,6 +27,12 @@ class BooksDashboardTest extends TestCase
             ->andReturn([
                 'title' => 'Uploaded Book',
                 'author' => 'Test Author',
+                'series' => 'Test Series',
+                'series_index' => '2',
+                'description' => 'A description.',
+                'language' => 'de',
+                'publisher' => 'Test Publisher',
+                'published_at' => '2020-01-02 00:00:00',
             ]);
 
         Livewire::test(BooksDashboard::class)
@@ -39,6 +45,10 @@ class BooksDashboardTest extends TestCase
         $this->assertSame('Uploaded Book', $book->title);
         $this->assertSame('Test Author', $book->author);
         $this->assertSame('uploaded-book.epub', $book->original_filename);
+        $this->assertSame('Test Series', $book->series);
+        $this->assertSame('de', $book->language);
+        $this->assertSame('Test Publisher', $book->publisher);
+        $this->assertSame('2020-01-02', $book->published_at?->format('Y-m-d'));
         Storage::disk('local')->assertExists($book->stored_path);
     }
 }

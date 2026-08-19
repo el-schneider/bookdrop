@@ -9,7 +9,10 @@ use ZipArchive;
 class EpubMetadataExtractor
 {
     /**
-     * @return array{title: string|null, author: string|null}
+     * Best effort: a book that yields no metadata is still usable, so every field degrades to null
+     * rather than failing the upload.
+     *
+     * @return array{title: string|null, author: string|null, series: string|null, series_index: string|null, description: string|null, language: string|null, publisher: string|null, published_at: string|null}
      */
     public function extract(string $path): array
     {
@@ -19,13 +22,57 @@ class EpubMetadataExtractor
             return [
                 'title' => $this->clean($epub->getTitle()),
                 'author' => $this->clean($this->formatAuthors($epub->getAuthors())),
+                'series' => $this->clean($this->stringOrNull($epub->getSeries())),
+                'series_index' => $this->clean($this->stringOrNull($epub->getSeriesIndex())),
+                'description' => $this->clean($this->stringOrNull($epub->getDescription())),
+                'language' => $this->clean($this->stringOrNull($epub->getLanguage())),
+                'publisher' => $this->clean($this->stringOrNull($epub->getPublisher())),
+                'published_at' => $this->publicationDate($epub),
             ];
         } catch (Throwable) {
-            return [
-                'title' => null,
-                'author' => null,
-            ];
+            return $this->emptyMetadata();
         }
+    }
+
+    /**
+     * @return array{title: null, author: null, series: null, series_index: null, description: null, language: null, publisher: null, published_at: null}
+     */
+    private function emptyMetadata(): array
+    {
+        return [
+            'title' => null,
+            'author' => null,
+            'series' => null,
+            'series_index' => null,
+            'description' => null,
+            'language' => null,
+            'publisher' => null,
+            'published_at' => null,
+        ];
+    }
+
+    /**
+     * Publication dates in the wild range from a bare year to a full timestamp, and some are not
+     * dates at all. Anything unparseable is dropped rather than guessed at.
+     */
+    private function publicationDate(EPub $epub): ?string
+    {
+        $raw = $this->clean($this->stringOrNull($epub->getCreationDate()));
+
+        if ($raw === null) {
+            return null;
+        }
+
+        try {
+            return (new \DateTimeImmutable($raw))->format('Y-m-d H:i:s');
+        } catch (Throwable) {
+            return null;
+        }
+    }
+
+    private function stringOrNull(mixed $value): ?string
+    {
+        return is_string($value) || is_numeric($value) ? (string) $value : null;
     }
 
     /**

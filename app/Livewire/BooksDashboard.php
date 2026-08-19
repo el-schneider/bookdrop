@@ -85,7 +85,19 @@ class BooksDashboard extends Component
             'format' => 'epub',
             'size_bytes' => (int) $upload->getSize(),
             'uploaded_at' => now(),
+            // Every metadata column is nullable: a book with no usable metadata is still valid.
+            'series' => $this->limited($metadata['series'] ?? null),
+            'series_index' => $this->limited($metadata['series_index'] ?? null),
+            'description' => $metadata['description'] ?? null,
+            'language' => $this->limited($metadata['language'] ?? null),
+            'publisher' => $this->limited($metadata['publisher'] ?? null),
+            'published_at' => $metadata['published_at'] ?? null,
         ]);
+    }
+
+    private function limited(?string $value): ?string
+    {
+        return $value === null ? null : Str::limit($value, 255, '');
     }
 
     private function titleFromFilename(string $filename): string

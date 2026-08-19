@@ -11,6 +11,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
+use Ramsey\Uuid\Uuid;
 use Symfony\Component\HttpFoundation\BinaryFileResponse;
 use Symfony\Component\HttpFoundation\Response;
 
@@ -80,32 +81,40 @@ class KoboController extends Controller
 
         // Books whose file is missing are dropped, so the limit cannot be applied in SQL: an
         // under-filled page would look exhaustive and the cursor would advance past books that
-        // were never delivered.
+        // were never delivered. Removed books are kept regardless, since their file is gone by
+        // design and the device still needs to be told they went away.
         // ponytail: loads all pending rows; fine for a personal library, revisit past ~10k books.
         $candidates = $this->booksForSync($syncToken)
-            ->filter(fn (Book $book): bool => $disk->exists($book->stored_path))
+            ->filter(fn (Book $book): bool => $book->trashed() || $disk->exists($book->stored_path))
             ->values();
 
         $hasMore = $candidates->count() > $limit;
         $page = $candidates->take($limit)->values();
 
-        $entitlements = $page->map(fn (Book $book): array => [
-            'NewEntitlement' => [
+        $entitlements = $page->map(function (Book $book) use ($request, $token, $syncToken): array {
+            $entitlement = [
                 'BookEntitlement' => $this->bookEntitlement($book),
                 'BookMetadata' => $this->bookMetadata($book, $request, $token),
-            ],
-        ])->values();
+            ];
+
+            // A book the device has never been offered is new; anything else is a change to a
+            // book it already knows about, including its removal.
+            return $this->isNewToDevice($book, $syncToken)
+                ? ['NewEntitlement' => $entitlement]
+                : ['ChangedEntitlement' => $entitlement];
+        })->values();
 
         $this->logKoboRequest('library.sync', $request, [
             'sync_token_present' => $syncToken !== null,
             'sync_mode' => $syncToken === null ? 'full' : 'delta',
             'book_count' => $entitlements->count(),
+            'removed_count' => $page->filter(fn (Book $book): bool => $book->trashed())->count(),
             'has_more' => $hasMore,
         ]);
 
         return response()->json($entitlements)
             ->header('x-kobo-sync', $hasMore ? 'continue' : 'complete')
-            ->header('x-kobo-synctoken', $this->nextSyncToken($request, $page));
+            ->header('x-kobo-synctoken', $this->nextSyncToken($request, $syncToken, $page, $hasMore));
     }
 
     public function metadata(Request $request, string $token, string $bookId): JsonResponse
@@ -278,52 +287,86 @@ class KoboController extends Controller
     }
 
     /**
-     * @param  array{at: Carbon, id: string|null}|null  $cursor
+     * @param  array{revision: int, created: Carbon}|null  $cursor
      */
     private function booksForSync(?array $cursor): Collection
     {
-        // uploaded_at has second precision, so several books can share one value. Ordering and
-        // resuming on (uploaded_at, id) keeps the cursor unambiguous; resuming on the timestamp
-        // alone would permanently skip the rest of a group split across two pages.
-        $query = Book::query()->orderBy('uploaded_at')->orderBy('id');
+        // Removed books must be included, so soft deletes are not filtered out here. Paging over
+        // the monotonic revision means a change made in the same second as the sync that
+        // delivered it still lands after the cursor.
+        return Book::query()
+            ->withTrashed()
+            ->when($cursor !== null, fn ($query) => $query->where('revision', '>', $cursor['revision']))
+            ->orderBy('revision')
+            ->get();
+    }
 
-        if ($cursor !== null) {
-            $query->where(function ($query) use ($cursor): void {
-                $query->where('uploaded_at', '>', $cursor['at'])
-                    ->orWhere(function ($query) use ($cursor): void {
-                        $query->where('uploaded_at', '=', $cursor['at']);
-
-                        if ($cursor['id'] !== null) {
-                            $query->where('id', '>', $cursor['id']);
-                        } else {
-                            $query->whereRaw('1 = 0');
-                        }
-                    });
-            });
+    /**
+     * @param  array{revision: int, created: Carbon}|null  $cursor
+     */
+    private function isNewToDevice(Book $book, ?array $cursor): bool
+    {
+        if ($book->trashed()) {
+            return false;
         }
 
-        return $query->get();
+        if ($cursor === null) {
+            return true;
+        }
+
+        return ($book->created_at ?? $book->uploaded_at)->greaterThan($cursor['created']);
     }
 
     /**
      * The device replays this token on its next request. It must identify the last book actually
-     * delivered; "now" would skip anything uploaded in the same second as this response.
+     * delivered, never "now".
      *
+     * @param  array{revision: int, created: Carbon}|null  $cursor
      * @param  \Illuminate\Support\Collection<int, Book>  $page
      */
-    private function nextSyncToken(Request $request, $page): string
+    private function nextSyncToken(Request $request, ?array $cursor, $page, bool $hasMore): string
     {
-        if ($page->isNotEmpty()) {
-            $last = $page->last();
+        if ($page->isEmpty()) {
+            // Nothing was delivered, so the device's position is unchanged. Echoing its own token
+            // back avoids advancing past books it has never seen.
+            $current = (string) $request->header('x-kobo-synctoken', '');
 
-            return $last->uploaded_at->toIso8601String().'|'.$last->id;
+            return $current !== '' ? $current : $this->encodeSyncToken(0, $this->epoch(), $this->epoch());
         }
 
-        // Nothing was delivered, so the device's position is unchanged. Echoing its own token back
-        // avoids advancing past books it has never seen.
-        $current = (string) $request->header('x-kobo-synctoken', '');
+        $previous = $cursor['created'] ?? $this->epoch();
 
-        return $current !== '' ? $current : Carbon::createFromTimestamp(0)->toIso8601String();
+        $newest = $page->reduce(
+            fn (Carbon $carry, Book $book): Carbon => $carry->max($book->created_at ?? $book->uploaded_at),
+            $this->epoch(),
+        );
+
+        // Pages are ordered by revision, which need not match creation order, so the newest
+        // creation date seen so far is accumulated across the whole run rather than read off the
+        // final page alone.
+        $pending = ($cursor['pending'] ?? $this->epoch())->max($newest);
+
+        // While pages remain the watermark must stay put: advancing it mid-run would make later
+        // pages of the same run report never-seen books as mere changes. Once the run finishes it
+        // takes the accumulated maximum, and can only move forward.
+        return $hasMore
+            ? $this->encodeSyncToken((int) $page->last()->revision, $previous, $pending)
+            : $this->encodeSyncToken((int) $page->last()->revision, $previous->max($pending), $this->epoch());
+    }
+
+    private function encodeSyncToken(int $revision, Carbon $created, ?Carbon $pending = null): string
+    {
+        return base64_encode((string) json_encode([
+            'v' => 2,
+            'revision' => $revision,
+            'created' => $created->utc()->toIso8601String(),
+            'pending' => ($pending ?? $this->epoch())->utc()->toIso8601String(),
+        ]));
+    }
+
+    private function epoch(): Carbon
+    {
+        return Carbon::createFromTimestamp(0)->utc();
     }
 
     /**
@@ -369,26 +412,45 @@ class KoboController extends Controller
     }
 
     /**
-     * Accepts our composite "<iso>|<book id>" token and the bare ISO token issued before paging
-     * existed, which devices in the field are still holding. A token minted by Kobo's own store
-     * (shape "blob.blob") is unparseable here and correctly degrades to a full sync.
+     * Accepts, in order: the current base64 JSON token; the composite "<iso>|<book id>" token; and
+     * the bare ISO token issued before paging existed, which devices in the field still hold. A
+     * token minted by Kobo's own store (shape "blob.blob") is unparseable here and correctly
+     * degrades to a full sync.
      *
-     * @return array{at: Carbon, id: string|null}|null
+     * @return array{modified: Carbon, id: string|null, created: Carbon}|null
      */
     private function syncToken(Request $request): ?array
     {
-        $syncToken = $request->header('x-kobo-synctoken');
+        $syncToken = (string) $request->header('x-kobo-synctoken', '');
 
         if (blank($syncToken)) {
             return null;
         }
 
-        [$timestamp, $id] = array_pad(explode('|', (string) $syncToken, 2), 2, null);
+        $decoded = json_decode((string) base64_decode($syncToken, true), true);
+
+        if (is_array($decoded) && ($decoded['v'] ?? null) === 2) {
+            try {
+                return [
+                    'revision' => (int) ($decoded['revision'] ?? 0),
+                    'created' => Carbon::parse($decoded['created'])->utc(),
+                    'pending' => Carbon::parse($decoded['pending'] ?? $decoded['created'])->utc(),
+                ];
+            } catch (\Throwable) {
+                // Fall through to the legacy handling below.
+            }
+        }
+
+        // Legacy tokens predate revisions: a bare ISO timestamp, or "<iso>|<book id>". Neither can
+        // be mapped to a revision, so the library is replayed from the start. Their timestamp is
+        // still used as the "created" watermark, so books the device already holds come back as
+        // changes rather than being announced as new.
+        [$timestamp] = array_pad(explode('|', $syncToken, 2), 2, null);
 
         try {
-            // Canonicalised to UTC so a token expressed in another offset still compares against
-            // the stored timestamps identically.
-            return ['at' => Carbon::parse($timestamp)->utc(), 'id' => $id];
+            $at = Carbon::parse($timestamp)->utc();
+
+            return ['revision' => 0, 'created' => $at, 'pending' => $at];
         } catch (\Throwable $exception) {
             $this->logKoboRequest('library.sync.invalid_token', $request, [
                 'error' => $exception::class,
@@ -408,20 +470,21 @@ class KoboController extends Controller
 
     private function bookEntitlement(Book $book): array
     {
-        $uploadedAt = $this->koboDate($book);
+        $createdAt = $this->koboTimestamp($book->created_at ?? $book->uploaded_at);
 
         return [
             'Accessibility' => 'Full',
             'ActivePeriod' => [
-                'From' => $uploadedAt,
+                'From' => $createdAt,
             ],
-            'Created' => $uploadedAt,
+            'Created' => $createdAt,
             'CrossRevisionId' => $book->id,
             'Id' => $book->id,
             'IsHiddenFromArchive' => false,
             'IsLocked' => false,
-            'IsRemoved' => false,
-            'LastModified' => $uploadedAt,
+            // The only way to retire a book from the device.
+            'IsRemoved' => $book->trashed(),
+            'LastModified' => $this->koboTimestamp($book->updated_at ?? $book->uploaded_at),
             'OriginCategory' => 'Imported',
             'RevisionId' => $book->id,
             'Status' => 'Active',
@@ -430,7 +493,7 @@ class KoboController extends Controller
 
     private function bookMetadata(Book $book, Request $request, string $token): array
     {
-        return [
+        $metadata = [
             'Categories' => ['00000000-0000-0000-0000-000000000001'],
             'ContributorRoles' => $book->author ? [[
                 'Name' => $book->author,
@@ -445,7 +508,7 @@ class KoboController extends Controller
             'CurrentLoveDisplayPrice' => [
                 'TotalAmount' => 0,
             ],
-            'Description' => '',
+            'Description' => $book->description ?? '',
             'DownloadUrls' => $this->downloadUrls($book, $request, $token),
             'EntitlementId' => $book->id,
             'ExternalIds' => [],
@@ -454,17 +517,29 @@ class KoboController extends Controller
             'IsInternetArchive' => false,
             'IsPreOrder' => false,
             'IsSocialEnabled' => true,
-            'Language' => 'en',
-            'PhoneticPronunciations' => [],
-            'PublicationDate' => $this->koboDate($book),
+            'Language' => $book->language ?: 'en',
+            'PhoneticPronunciations' => (object) [],
+            'PublicationDate' => $this->koboTimestamp($book->published_at ?? $book->uploaded_at),
             'Publisher' => [
                 'Imprint' => '',
-                'Name' => 'Bookdrop',
+                'Name' => $book->publisher ?: 'Bookdrop',
             ],
             'RevisionId' => $book->id,
             'Title' => $book->title,
             'WorkId' => $book->id,
         ];
+
+        if (filled($book->series)) {
+            $metadata['Series'] = [
+                'Name' => $book->series,
+                'Number' => (int) $book->series_index,
+                'NumberFloat' => (float) $book->series_index,
+                // Deterministic so the same series keeps one identity across books and syncs.
+                'Id' => Uuid::uuid5(Uuid::NAMESPACE_DNS, $book->series)->toString(),
+            ];
+        }
+
+        return $metadata;
     }
 
     private function downloadUrls(Book $book, Request $request, string $token): array
