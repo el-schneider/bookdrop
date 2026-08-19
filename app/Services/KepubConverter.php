@@ -50,13 +50,29 @@ class KepubConverter
         $target = $directory.'/'.pathinfo($storedPath, PATHINFO_FILENAME).'.kepub.epub';
 
         // kepubify names its own output, so it writes into a scratch directory that is then
-        // moved to a predictable path.
+        // moved to a predictable path. The directory MUST exist first: given a path that does
+        // not, kepubify treats it as an output filename and silently copies the EPUB through
+        // unconverted rather than failing.
         $scratch = $disk->path($directory).'/.tmp-'.bin2hex(random_bytes(6));
+
+        if (! @mkdir($scratch, 0775, true) && ! is_dir($scratch)) {
+            logger()->warning('Kepubify scratch directory could not be created', ['path' => $scratch]);
+
+            return null;
+        }
 
         try {
             $process = new Process([$binary, '--output', $scratch, $source]);
             $process->setTimeout((float) config('bookdrop.kepubify_timeout'));
             $process->mustRun();
+
+            // kepubify reports a per-run tally; a book it could not convert is "copied" through
+            // unchanged, which must not be advertised to the device as a KEPUB.
+            if (str_contains($process->getOutput().$process->getErrorOutput(), '0 converted')) {
+                logger()->warning('Kepubify copied without converting', ['path' => $storedPath]);
+
+                return null;
+            }
 
             $produced = glob($scratch.'/*.kepub.epub') ?: [];
 
