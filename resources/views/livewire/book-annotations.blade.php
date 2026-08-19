@@ -1,14 +1,14 @@
 <div class="space-y-8">
     <section class="bd-rule-panel">
         <div class="bd-section">
-            <div class="mb-6 space-y-3">
-                <p class="bd-eyebrow">Annotations</p>
-                <h2 class="text-base font-normal">{{ $book->title }}</h2>
-                <p class="bd-subhead">
-                    {{ $book->author ?: 'Unknown author' }} ·
-                    {{ $annotations->count() }} {{ \Illuminate\Support\Str::plural('annotation', $annotations->count()) }}
-                </p>
-                <a href="{{ route('library') }}" class="bd-page-link inline-block">Back to library</a>
+            <div class="mb-6 grid gap-6 md:grid-cols-[1fr_auto] md:items-end">
+                <div class="space-y-3">
+                    <p class="bd-eyebrow">Highlights</p>
+                    <h2 class="text-base font-normal">
+                        {{ $annotations->count() }} {{ \Illuminate\Support\Str::plural('annotation', $annotations->count()) }}
+                    </h2>
+                </div>
+                <a href="{{ route('library') }}" class="bd-page-link">Back to library</a>
             </div>
 
             <div class="space-y-6">

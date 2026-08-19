@@ -43,7 +43,6 @@ class BookAnnotationsPageTest extends TestCase
         $this->annotation($book, 'first', 'OEBPS/ch1.xhtml', 0.1);
 
         $rendered = Livewire::test(BookAnnotations::class, ['book' => $book->id])
-            ->assertSee('Annotated Book')
             ->assertSee('OEBPS/ch1.xhtml')
             ->assertSee('OEBPS/ch2.xhtml')
             ->html();
@@ -63,6 +62,18 @@ class BookAnnotationsPageTest extends TestCase
 
         Livewire::test(BookAnnotations::class, ['book' => $book->id])
             ->assertSee('No annotations yet');
+    }
+
+    public function test_the_page_shows_the_book_in_the_standard_page_shell(): void
+    {
+        $book = $this->book('Annotated Book');
+        $this->annotation($book, 'a1');
+
+        $this->get(route('library.books.annotations', $book))
+            ->assertOk()
+            ->assertSee('Annotated Book')      // page header, from the shared shell
+            ->assertSee('Test Author')
+            ->assertSee('bd-container', false); // content is contained like every other page
     }
 
     public function test_the_page_requires_authentication(): void

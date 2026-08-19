@@ -5,6 +5,7 @@ use App\Http\Controllers\KoboController;
 use App\Http\Controllers\KoboReadingServicesController;
 use App\Http\Controllers\LibraryCoverController;
 use App\Http\Middleware\RecordKoboTraffic;
+use App\Models\Book;
 use Illuminate\Support\Facades\Route;
 
 Route::view('/', 'welcome');
@@ -21,7 +22,7 @@ Route::get('library/books/{book}/cover', LibraryCoverController::class)
     ->middleware(['auth', 'verified'])
     ->name('library.books.cover');
 
-Route::get('library/books/{book}/annotations', function (string $book) {
+Route::get('library/books/{book}/annotations', function (Book $book) {
     return view('book-annotations', ['book' => $book]);
 })->middleware(['auth', 'verified'])->name('library.books.annotations');
 

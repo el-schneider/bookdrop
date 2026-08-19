@@ -1,7 +1,7 @@
-<x-app-layout>
-    <x-slot name="header">
-        <h2 class="bd-eyebrow">Annotations</h2>
-    </x-slot>
-
-    <livewire:book-annotations :book="$book" />
-</x-app-layout>
+<x-page
+    eyebrow="Annotations"
+    :title="$book->title"
+    :lead="$book->author ?: 'Highlights and notes synced from the Kobo.'"
+>
+    <livewire:book-annotations :book="$book->id" />
+</x-page>
